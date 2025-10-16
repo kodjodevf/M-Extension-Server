@@ -46,6 +46,7 @@ apk-parser = "net.dongliu:apk-parser:2.6.10"
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-logging-interceptor = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "okhttp" }
 okhttp-dns-over-https = { module = "com.squareup.okhttp3:okhttp-dnsoverhttps", version.ref = "okhttp" }
+okhttp-brotli = { module = "com.squareup.okhttp3:okhttp-brotli", version.ref = "okhttp" }
 okio = "com.squareup.okio:okio:3.3.0"
 
 # dependencies of Tachiyomi extensions
@@ -98,6 +99,7 @@ okhttp = [
     "okhttp",
     "okhttp-logging-interceptor",
     "okhttp-dns-over-https",
+    "okhttp-brotli",
     "okio"
 ]
 tachiyomi = [
