@@ -2,14 +2,18 @@
 kotlin = "2.1.0"
 coroutines = "1.10.1"
 serialization = "1.8.0"
-dex2jar = "v64" # Stuck at v64 because of https://github.com/ThexXTURBOXx/dex2jar/issues/27
+dex2jar = "2.4.32"
 okhttp = "5.3.0"
-rhino = "1.7.14"
 multiplatform-settings = "0.8.1"
 
 [libraries]
 kotlin-stdlib-jdk8 = { module = "org.jetbrains.kotlin:kotlin-stdlib-jdk8", version.ref = "kotlin" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
+
+# Quickjs4j
+quickjs4j = "io.roastedroot:quickjs4j:0.0.13"
+quickjs4j-annotations = "io.roastedroot:quickjs4j-annotations:0.0.13"
+quickjs4j-processor = "io.roastedroot:quickjs4j-processor:0.0.13"
 
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-jdk8 = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-jdk8", version.ref = "coroutines" }
@@ -30,15 +34,15 @@ rxjava = "io.reactivex:rxjava:1.3.8"
 rxkotlin = "io.reactivex:rxkotlin:1.0.0"
 
 # JSoup
-jsoup = "org.jsoup:jsoup:1.18.3"
+jsoup = "org.jsoup:jsoup:1.21.2"
 
 # Dependency of :AndroidCompat:Config
 typesafe_config = "com.typesafe:config:1.4.2"
-config4k = "io.github.config4k:config4k:0.4.2"
 
 # dex2jar
-dex-translator = { module = "com.github.ThexXTURBOXx.dex2jar:dex-translator", version.ref = "dex2jar" }
-dex-tools = { module = "com.github.ThexXTURBOXx.dex2jar:dex-tools", version.ref = "dex2jar" }
+asm = "org.ow2.asm:asm:9.8"
+dex2jar-translator = { module = "de.femtopedia.dex2jar:dex-translator", version.ref = "dex2jar" }
+dex2jar-tools = { module = "de.femtopedia.dex2jar:dex-tools", version.ref = "dex2jar" }
 
 # APK parser
 apk-parser = "net.dongliu:apk-parser:2.6.10"
@@ -50,15 +54,12 @@ okhttp-dns-over-https = { module = "com.squareup.okhttp3:okhttp-dnsoverhttps", v
 okhttp-brotli = { module = "com.squareup.okhttp3:okhttp-brotli", version.ref = "okhttp" }
 okio = "com.squareup.okio:okio:3.3.0"
 
-# dependencies of Tachiyomi extensions
+# injekt-core
 injekt-core = { module = "com.github.null2264.injekt:injekt-core", version = "4135455a2a" }
-quickjs = "app.cash.quickjs:quickjs-jvm:0.9.2"
 
 xmlpull = "xmlpull:xmlpull:1.1.3.4a"
 apksig = "com.android.tools.build:apksig:8.13.0"
 androidx-annotation = "androidx.annotation:annotation:1.3.0"
-rhino-runtime = { module = "org.mozilla:rhino-runtime", version.ref = "rhino" }
-rhino-engine = { module = "org.mozilla:rhino-engine", version.ref = "rhino" }
 multiplatform-settings-jvm = { module = "com.russhwolf:multiplatform-settings-jvm", version.ref = "multiplatform-settings" }
 multiplatform-settings-serialization-jvm = { module = "com.russhwolf:multiplatform-settings-serialization-jvm", version.ref = "multiplatform-settings" }
 icu4j = "com.ibm.icu:icu4j:70.1"
@@ -67,8 +68,8 @@ icu4j = "com.ibm.icu:icu4j:70.1"
 nanohttpd = "org.nanohttpd:nanohttpd:2.3.1"
 
 # Jackson
-jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.15.2"
-jackson-kotlin = "com.fasterxml.jackson.module:jackson-module-kotlin:2.15.2"
+jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.18.3"
+jackson-kotlin = "com.fasterxml.jackson.module:jackson-module-kotlin:2.18.3"
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -99,13 +100,16 @@ common = [
     "rxkotlin",
     "jsoup",
     "typesafe_config",
-    "config4k",
-    "dex-translator",
-    "dex-tools",
+    "dex2jar-translator",
+    "dex2jar-tools",
     "apk-parser",
     "nanohttpd",
     "jackson-databind",
     "jackson-kotlin",
+    "injekt-core",
+    "quickjs4j",
+    "quickjs4j-annotations",
+    "quickjs4j-processor"
 ]
 okhttp = [
     "okhttp",
@@ -114,13 +118,8 @@ okhttp = [
     "okhttp-brotli",
     "okio"
 ]
-tachiyomi = [
-    "injekt-core",
-    "quickjs",
-]
+
 androidcompat-implementation = [
-    "rhino-runtime",
-    "rhino-engine",
     "multiplatform-settings-jvm",
     "multiplatform-settings-serialization-jvm",
     "icu4j",

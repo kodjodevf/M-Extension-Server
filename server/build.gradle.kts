@@ -15,8 +15,6 @@ plugins {
 
 dependencies {
     implementation(libs.bundles.okhttp)
-    implementation(libs.bundles.tachiyomi)
-    implementation(libs.kotlin.reflect)
 
     // AndroidCompat
     implementation(project(":AndroidCompat"))

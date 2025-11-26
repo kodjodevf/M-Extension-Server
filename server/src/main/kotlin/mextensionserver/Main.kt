@@ -22,10 +22,11 @@ private val androidCompat by lazy { AndroidCompat() }
 
 @Suppress("BlockingMethodInNonBlockingContext")
 suspend fun main(args: Array<String>) {
+    val port = args.getOrNull(0)?.toIntOrNull() ?: 0
     val appDir = args.getOrNull(1)
     initApplication(appDir)
     val controller = MExtensionServerController()
-    controller.start()
+    controller.start(port)
     Runtime.getRuntime().addShutdownHook(Thread { controller.stop() })
     // Keep running
     while (controller.isRunning()) {
@@ -34,7 +35,7 @@ suspend fun main(args: Array<String>) {
 }
 
 private fun initApplication(appDir: String?) {
-    logger.info("Running mextensionserver ${BuildConfig.VERSION} revision ${BuildConfig.REVISION}")
+    logger.info("Running MExtensionServer ${BuildConfig.VERSION} revision ${BuildConfig.REVISION}")
 
     // Set custom app directory if provided
     appDir?.let { System.setProperty("ts.server.rootDir", it) }

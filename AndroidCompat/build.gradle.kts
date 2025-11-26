@@ -12,6 +12,9 @@ dependencies {
 
     // Config API
     implementation(project(":AndroidCompat:Config"))
+
+    annotationProcessor(libs.quickjs4j.processor)
+
 }
 
 tasks {

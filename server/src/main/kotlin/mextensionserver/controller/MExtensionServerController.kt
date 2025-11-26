@@ -9,9 +9,9 @@ class MExtensionServerController {
     private val logger = KotlinLogging.logger {}
     private var server: WebServer? = null
 
-    fun start() {
+    fun start(port: Int) {
         try {
-            server = WebServer(0)
+            server = WebServer(port)
             server?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             val actualPort = server?.listeningPort ?: 0
             logger.info { "mextensionserver server started on port $actualPort" }
