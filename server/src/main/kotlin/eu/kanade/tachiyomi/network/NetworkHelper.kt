@@ -50,22 +50,10 @@ class NetworkHelper(
             .build()
     }
 
-    private val defaultUserAgent by lazy {
-        context
-            .getSharedPreferences(
-                "m_mangayomi",
-                Context.MODE_PRIVATE,
-            ).getString("m_user_agent", System.getProperty("http.agent").orEmpty())
-    }
+    private var defaultUserAgent: String = System.getProperty("http.agent").orEmpty()
 
     fun setUA(ua: String) {
-        context
-            .getSharedPreferences(
-                "m_mangayomi",
-                Context.MODE_PRIVATE,
-            ).edit()
-            .putString("m_user_agent", ua)
-            .apply()
+        defaultUserAgent = ua
     }
 
     fun defaultUserAgentProvider() = defaultUserAgent
