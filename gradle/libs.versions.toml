@@ -68,8 +68,8 @@ icu4j = "com.ibm.icu:icu4j:70.1"
 nanohttpd = "org.nanohttpd:nanohttpd:2.3.1"
 
 # Jackson
-jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.18.3"
-jackson-kotlin = "com.fasterxml.jackson.module:jackson-module-kotlin:2.18.3"
+jackson-databind = "tools.jackson.core:jackson-databind:3.0.2"
+jackson-kotlin = "tools.jackson.module:jackson-module-kotlin:3.0.2"
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

@@ -1,7 +1,5 @@
 package mextensionserver.controller
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import fi.iki.elonen.NanoHTTPD
@@ -11,10 +9,11 @@ import mextensionserver.model.DataBody
 import mu.KotlinLogging
 import okhttp3.Cookie
 import okhttp3.HttpUrl
+import tools.jackson.module.kotlin.jacksonObjectMapper
 
 class DalvikHandler {
     private val logger = KotlinLogging.logger {}
-    private val objectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
+    private val objectMapper = jacksonObjectMapper()
 
     fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response =
         try {
