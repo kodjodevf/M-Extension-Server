@@ -10,40 +10,161 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build artifacts and create draft release
+  check_wrapper:
+    name: Validate Gradle Wrapper
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout ${{ github.ref }}
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
-        with:
-          ref: ${{ github.ref }}
+      - name: Clone repo
+        uses: actions/checkout@v5
 
       - name: Validate Gradle Wrapper
-        uses: gradle/wrapper-validation-action@56b90f209b02bf6d1deae490e9ef18b21a389cd4 # v1
+        uses: gradle/actions/wrapper-validation@v5
+
+  build-jar:
+    name: Build Jar
+    needs: check_wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Set up JDK
-        uses: actions/setup-java@0ab4596768b603586c0de567f2430c30f5b0d2b0 # v3
+        uses: actions/setup-java@v5
         with:
-          java-version: 17
-          distribution: adopt
+          java-version: "17"
+          distribution: "temurin"
 
       - name: Generate android.jar
+        run: ./AndroidCompat/getAndroid.sh
+
+      - name: Build project (shadowJar)
+        run: ./gradlew :server:shadowJar --no-daemon --stacktrace
+
+      - name: Upload Jar
+        uses: actions/upload-artifact@v5
+        with:
+          name: jar
+          path: server/build/libs/*.jar
+          if-no-files-found: error
+
+  jlink:
+    name: Create platform JREs
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+          - os: windows-latest
+            name: windows-x64
+          - os: macos-14
+            name: macOS-arm64
+          - os: macos-13
+            name: macOS-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Make build_jre.sh executable
+        run: chmod +x ./build_jre.sh
+
+      - name: Generate JRE using build_jre.sh
+        shell: bash
         run: |
-          ./AndroidCompat/getAndroid.sh
+          ./build_jre.sh
 
-      - name: Build project
-        uses: gradle/gradle-command-action@982da8e78c05368c70dac0351bb82647a9e9a5d2 # v2
+      - name: Upload JRE package
+        uses: actions/upload-artifact@v5
         with:
-          arguments: :server:shadowJar
+          name: ${{ matrix.name }}-jre
+          path: jre
 
-      - name: Upload Release
-        uses: xresloader/upload-to-github-release@2290df57aa316d1dae840ca57126a33bda98f45f # v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  bundle:
+    name: Bundle JAR + JRE per platform
+    needs: [build-jar, jlink]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            jre: linux-x64
+          - name: macOS-x64
+            jre: macOS-x64
+          - name: macOS-arm64
+            jre: macOS-arm64
+          - name: windows-x64
+            jre: windows-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download Jar
+        uses: actions/download-artifact@v6
         with:
-          file: "server/build/*.jar"
-          tags: true
-          draft: true
-          verbose: true
+          name: jar
+          path: server/build
+
+      - name: Download JRE for platform
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ matrix.jre }}-jre
+          path: jre
+
+      - name: Prepare bundle
+        shell: bash
+        run: |
+          mkdir -p upload/jre
+          cp server/build/*.jar upload/
+          if [ -d "jre" ]; then
+            mv jre upload/jre/
+          fi
+          ARCHIVE_NAME="${{ matrix.name }}-bundle.zip"
+          cd upload
+          zip -r ../${ARCHIVE_NAME} .
+
+      - name: Upload bundled artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}-bundle.zip
+          if-no-files-found: error
+
+  release:
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: linux-x64
+          path: release
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: macOS-x64
+          path: release
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: macOS-arm64
+          path: release
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: windows-x64
+          path: release
+
+      - name: Upload release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: release/*
