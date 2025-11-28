@@ -44,7 +44,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: jar
-          path: server/build/libs/*.jar
+          path: server/build/*.jar
           if-no-files-found: error
 
   jlink:
