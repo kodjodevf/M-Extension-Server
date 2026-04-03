@@ -65,6 +65,10 @@ jobs:
           java-version: "21"
           distribution: "temurin"
 
+      - name: Install zip (Windows)
+        run: choco install zip -y
+        shell: powershell
+
       - name: Generate android.jar
         run: bash ./AndroidCompat/getAndroid.sh
         shell: bash
