@@ -161,6 +161,11 @@ jobs:
           if [ -f "windows/MExtensionServer-Windows-x64.zip" ]; then
             mv windows/MExtensionServer-Windows-x64.zip final/MExtensionServer-Windows-x64.zip
           fi
+          # Add the .exe installer
+          EXE_FILE=$(find windows -name "MExtensionServer*-setup-x64.exe" | head -n 1)
+          if [ -n "$EXE_FILE" ]; then
+            mv "$EXE_FILE" final/MExtensionServer-Windows-Setup.exe
+          fi
 
           # Linux
           if [ -f "linux/MExtensionServer-Linux-x64.tar.gz" ]; then
@@ -168,6 +173,11 @@ jobs:
           fi
           if [ -f "linux/MExtensionServer-x86_64.AppImage" ]; then
             mv linux/MExtensionServer-x86_64.AppImage final/MExtensionServer-x86_64.AppImage
+          fi
+          # Add the .deb package
+          DEB_FILE=$(find linux -name "*.deb" | head -n 1)
+          if [ -n "$DEB_FILE" ]; then
+            mv "$DEB_FILE" final/MExtensionServer-Linux.deb
           fi
 
           ls -la final/
