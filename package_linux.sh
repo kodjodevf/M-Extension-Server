@@ -8,23 +8,22 @@
 #
 # Usage:
 #   chmod +x package_linux.sh
-#   ./package_linux.sh                    # portable tar.gz only
-#   ./package_linux.sh --appimage         # + AppImage
-#   ./package_linux.sh --deb              # + .deb package
-#   ./package_linux.sh --appimage --deb   # all formats
+#   ./package_linux.sh                    # builds everything (portable, .appimage, .deb)
+#   ./package_linux.sh --no-appimage      # skip AppImage
+#   ./package_linux.sh --no-deb           # skip .deb
 # --------------------------------------------------------------------------
 set -euo pipefail
 
 APP_NAME="MExtensionServer"
 BUNDLE_NAME="MExtensionServer-Linux-x64"
 DEST="dist"
-BUILD_APPIMAGE=false
-BUILD_DEB=false
+BUILD_APPIMAGE=true
+BUILD_DEB=true
 ICON_SRC="server/src/main/resources/icon-red.png"
 
 for arg in "$@"; do
-  [[ "$arg" == "--appimage" ]] && BUILD_APPIMAGE=true
-  [[ "$arg" == "--deb" ]] && BUILD_DEB=true
+  [[ "$arg" == "--no-appimage" ]] && BUILD_APPIMAGE=false
+  [[ "$arg" == "--no-deb" ]] && BUILD_DEB=false
 done
 
 # Check tools

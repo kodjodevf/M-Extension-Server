@@ -10,7 +10,7 @@
 # --------------------------------------------------------------------------
 
 param(
-    [switch]$BuildInstaller = $false
+    [switch]$BuildInstaller = $true
 )
 
 $ErrorActionPreference = "Stop"

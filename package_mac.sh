@@ -6,8 +6,7 @@
 #
 # Usage:
 #   chmod +x package_mac.sh
-#   ./package_mac.sh            # builds .app in dist/
-#   ./package_mac.sh --dmg      # also wraps the .app in a .dmg via hdiutil
+#   ./package_mac.sh            # builds .dmg in dist/
 # --------------------------------------------------------------------------
 set -euo pipefail
 
@@ -15,10 +14,12 @@ APP_NAME="MExtensionServer"
 BUNDLE_ID="com.mangayomi.mextensionserver"
 DEST="dist"
 APP_BUNDLE="$DEST/${APP_NAME}.app"
-CREATE_DMG=false
+# Always create DMG as requested
+CREATE_DMG=true
 
+# Parse args if any (for future proofing, though default is now true)
 for arg in "$@"; do
-  [[ "$arg" == "--dmg" ]] && CREATE_DMG=true
+  [[ "$arg" == "--no-dmg" ]] && CREATE_DMG=false
 done
 
 ICON_SRC="server/src/main/resources/icon-red.png"
@@ -163,11 +164,7 @@ if command -v /System/Library/Frameworks/CoreServices.framework/Frameworks/Launc
     -f "$APP_BUNDLE" &>/dev/null || true
 fi
 
-echo ""
-echo "✓  Bundle created: $APP_BUNDLE"
-echo "   Run with:  open \"$APP_BUNDLE\""
-
-# Optional: create .dmg via hdiutil
+# 5. Create .dmg via hdiutil
 if $CREATE_DMG; then
   DMG_PATH="$DEST/${APP_NAME}.dmg"
   STAGING="$(mktemp -d)"
@@ -175,6 +172,7 @@ if $CREATE_DMG; then
   echo ""
   echo "[*] Building DMG..."
   cp -R "$APP_BUNDLE" "$STAGING/"
+  rm -rf "$APP_BUNDLE"
 
   # Create symlink so users can drag to Applications
   ln -s /Applications "$STAGING/Applications"
@@ -190,4 +188,10 @@ if $CREATE_DMG; then
   rm -rf "$STAGING"
 
   echo "✓  DMG created: $DMG_PATH"
+else
+  # If not creating DMG, at least keep the .app or notify
+  echo "✓  Bundle created: $APP_BUNDLE (no DMG)"
 fi
+
+echo ""
+echo "[OK] Mac packaging complete!"

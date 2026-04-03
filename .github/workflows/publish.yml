@@ -40,14 +40,13 @@ jobs:
       - name: Build macOS bundle and DMG
         run: |
           chmod +x ./package_mac.sh
-          ./package_mac.sh --dmg
+          ./package_mac.sh
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-bundles
           path: |
-            dist/MExtensionServer.app
             dist/MExtensionServer.dmg
           if-no-files-found: error
 
@@ -75,14 +74,16 @@ jobs:
 
       - name: Build Windows bundle
         run: |
-          powershell -ExecutionPolicy Bypass -File ".\package_windows.ps1"
+          powershell -ExecutionPolicy Bypass -File ".\package_windows.ps1" -BuildInstaller
         shell: powershell
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-bundles
-          path: dist/MExtensionServer-Windows-x64.zip
+          path: |
+            dist/MExtensionServer*-setup-x64.exe
+            dist/MExtensionServer-Windows-x64.zip
           if-no-files-found: error
 
   build-linux:
@@ -107,19 +108,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y appimage-tools || true
 
-      - name: Build Linux bundle with AppImage
+      - name: Build Linux bundle
         run: |
           chmod +x ./package_linux.sh
-          ./package_linux.sh --appimage
+          ./package_linux.sh
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-bundles
           path: |
-            dist/MExtensionServer-Linux-x64.tar.gz
-            dist/MExtensionServer-x86_64.AppImage
-          if-no-files-found: warn
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
 
   release:
     name: Create GitHub Release
