@@ -1,5 +1,5 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# package_windows.ps1 – Build shadow JAR → custom JRE (jlink) → Windows bundle
+# --------------------------------------------------------------------------
+# package_windows.ps1 - Build shadow JAR -> custom JRE (jlink) -> Windows bundle
 #
 # Creates a portable .zip bundle with embedded JRE.
 # Optionally creates an .exe installer using Inno Setup (if installed).
@@ -7,7 +7,7 @@
 # Usage (PowerShell):
 #   .\package_windows.ps1
 #   .\package_windows.ps1 -BuildInstaller
-# ─────────────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------------
 
 param(
     [switch]$BuildInstaller = $false
@@ -20,66 +20,66 @@ $BUNDLE_NAME = "MExtensionServer-Windows-x64"
 $DEST = "dist"
 $ICON_SRC = "server/src/main/resources/icon-red.png"
 
-# ── 0. Check tools ────────────────────────────────────────────────────────────
-Write-Host "▸ Checking prerequisites…"
+# Check tools
+Write-Host "[*] Checking prerequisites..."
 
 $tools = @("java", "jlink", "magick")  # magick = ImageMagick (for ICO conversion)
 foreach ($tool in $tools) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
         if ($tool -eq "magick") {
-            Write-Host "  ⚠ Warning: ImageMagick not found. Icon conversion skipped."
-            Write-Host "    → Download from https://imagemagick.org/script/download.php"
+            Write-Host "  [!] Warning: ImageMagick not found. Icon conversion skipped."
+            Write-Host "      Download from https://imagemagick.org/script/download.php"
         } else {
-            Write-Host "✗ Error: '$tool' not found."
+            Write-Host "[ERROR] Error: '$tool' not found."
             exit 1
         }
     }
 }
 
-# ── 1. Build shadow JAR ───────────────────────────────────────────────────────
+# Build shadow JAR
 Write-Host ""
-Write-Host "▸ Building shadow JAR…"
+Write-Host "[*] Building shadow JAR..."
 & .\gradlew.bat shadowJar
 
 $jarFile = Get-ChildItem "server/build/${APP_NAME}-*.jar" | Select-Object -Last 1
 if (-not $jarFile) {
-    Write-Host "✗ Error: JAR not found in server/build/"
+    Write-Host "[ERROR] Error: JAR not found in server/build/"
     exit 1
 }
 $jarName = $jarFile.Name
 Write-Host "  JAR: $($jarFile.FullName)"
 
-# ── 2. Convert PNG → ICO ──────────────────────────────────────────────────────
+# Convert PNG -> ICO
 $icoFile = ""
 if (Test-Path $ICON_SRC) {
     Write-Host ""
-    Write-Host "▸ Converting icon to .ico…"
+    Write-Host "[*] Converting icon to .ico..."
     $icoDir = [System.IO.Path]::GetTempPath() + [System.IO.Path]::GetRandomFileName()
     New-Item -ItemType Directory -Path $icoDir -Force | Out-Null
     
     $icoOutput = "$icoDir\AppIcon.ico"
     try {
-        # ImageMagick to convert PNG → ICO
+        # ImageMagick to convert PNG -> ICO
         & magick convert "$ICON_SRC" -define icon:auto-resize=256,128,96,64,48,32,16 "$icoOutput"
         if (Test-Path $icoOutput) {
             $icoFile = $icoOutput
             Write-Host "  Icon: $icoFile"
         } else {
-            Write-Host "  ⚠ Icon conversion failed, skipping"
+            Write-Host "  [!] Icon conversion failed, skipping"
         }
     } catch {
-        Write-Host "  ⚠ Icon conversion failed: $_"
+        Write-Host "  [!] Icon conversion failed: $_"
     }
 } else {
     Write-Host "  Warning: Icon not found at $ICON_SRC"
 }
 
-# ── 3. Build custom JRE with jlink ───────────────────────────────────────────
+# Build custom JRE with jlink
 $jreTmpDir = ".jre_build_tmp"
 if (Test-Path $jreTmpDir) { Remove-Item -Recurse -Force $jreTmpDir }
 
 Write-Host ""
-Write-Host "▸ Building custom JRE with jlink…"
+Write-Host "[*] Building custom JRE with jlink..."
 $modules = @(
     "java.base","java.compiler","java.datatransfer","java.desktop","java.instrument",
     "java.logging","java.management","java.naming","java.prefs","java.scripting","java.se",
@@ -99,9 +99,9 @@ $modules = @(
 $jreSizeMB = [math]::Round((Get-ChildItem -Recurse $jreTmpDir | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
 Write-Host "  JRE size: ${jreSizeMB} MB"
 
-# ── 4. Assemble bundle ────────────────────────────────────────────────────────
+# Assemble bundle
 Write-Host ""
-Write-Host "▸ Assembling Windows bundle…"
+Write-Host "[*] Assembling Windows bundle..."
 
 $bundleDir = "$DEST\$BUNDLE_NAME"
 if (Test-Path $bundleDir) { Remove-Item -Recurse -Force $bundleDir }
@@ -203,66 +203,71 @@ MORE INFO:
 Set-Content -Path "$bundleDir\README.txt" -Value $readmeContent -Encoding ASCII
 
 Write-Host ""
-Write-Host "✓ Bundle created: $bundleDir"
+Write-Host "[OK] Bundle created: $bundleDir"
 Write-Host "   Run: .\launcher.vbs   (recommended, no console)"
 Write-Host "   Or:  .\launcher.bat   (with console)"
 
-# ── 5. Create portable .zip ───────────────────────────────────────────────────
+# Create portable .zip
 Write-Host ""
-Write-Host "▸ Creating .zip archive…"
+Write-Host "[*] Creating .zip archive..."
 $zipPath = "$DEST\$BUNDLE_NAME.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($bundleDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
-Write-Host "✓ Portable ZIP: $zipPath"
+Write-Host "[OK] Portable ZIP: $zipPath"
 
-# ── 6. Optional: Build Inno Setup installer ──────────────────────────────────
+# Optional: Build Inno Setup installer
 if ($BuildInstaller) {
     if (Get-Command "iscc" -ErrorAction SilentlyContinue) {
         Write-Host ""
-        Write-Host "▸ Building Inno Setup installer…"
+        Write-Host "[*] Building Inno Setup installer..."
         
         $bundleAbsPath = (Get-Item $bundleDir).FullName
         $distAbsPath = (Get-Item $DEST).FullName
         
         # Create .iss script
-        $issContent = @"
-#define MyAppName "MExtension Server"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "kodjodevf"
-#define SourceDir "$bundleAbsPath"
-
-[Setup]
-AppId={{3E8F8E42-5A8C-4B1A-9E2B-8F8E8E8E8E8E}
-AppName={#MyAppName}
-AppVersion={#MyAppVersion}
-AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppName}
-DefaultGroupName={#MyAppName}
-AllowNoIcons=yes
-WizardStyle=modern
-CompressLevel=max
-SolidCompression=yes
-OutputDir=$distAbsPath
-OutputBaseFilename=MExtensionServer-{#MyAppVersion}-setup-x64
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
-
-[Languages]
-Name: "en"; MessagesFile: "compiler:Default.isl"
-
-[Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "Setup.iss"
-
-[Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\launcher.vbs"; IconFilename: "{app}\AppIcon.ico"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\launcher.vbs"; IconFilename: "{app}\AppIcon.ico"
-
-[Run]
-Filename: "{app}\launcher.vbs"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
-"@
+        $distAbsPath = [System.String]::Empty
+        if (Test-Path $DEST) {
+            $distAbsPath = (Get-Item $DEST).FullName
+        }
+        $issLines = @(
+            '#define MyAppName "MExtension Server"',
+            '#define MyAppVersion "1.0.0"',
+            '#define MyAppPublisher "kodjodevf"',
+            "#define SourceDir `"$bundleAbsPath`"",
+            '',
+            '[Setup]',
+            'AppId={{3E8F8E42-5A8C-4B1A-9E2B-8F8E8E8E8E8E}}',
+            'AppName={#MyAppName}',
+            'AppVersion={#MyAppVersion}',
+            'AppPublisher={#MyAppPublisher}',
+            'DefaultDirName={autopf}\{#MyAppName}',
+            'DefaultGroupName={#MyAppName}',
+            'AllowNoIcons=yes',
+            'WizardStyle=modern',
+            'CompressLevel=max',
+            'SolidCompression=yes',
+            "OutputDir=$distAbsPath",
+            'OutputBaseFilename=MExtensionServer-{#MyAppVersion}-setup-x64',
+            'ArchitecturesAllowed=x64',
+            'ArchitecturesInstallIn64BitMode=x64',
+            '',
+            '[Languages]',
+            'Name: "en"; MessagesFile: "compiler:Default.isl"',
+            '',
+            '[Files]',
+            'Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs; Excludes: "Setup.iss"',
+            '',
+            '[Icons]',
+            'Name: "{group}\{#MyAppName}"; Filename: "{app}\launcher.vbs"; IconFilename: "{app}\AppIcon.ico"',
+            'Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\launcher.vbs"; IconFilename: "{app}\AppIcon.ico"',
+            '',
+            '[Run]',
+            'Filename: "{app}\launcher.vbs"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent'
+        )
+        $issContent = $issLines -join "`n"
         $issFile = "$DEST\Setup.iss"
         Set-Content -Path $issFile -Value $issContent -Encoding ASCII
         
@@ -272,16 +277,16 @@ Filename: "{app}\launcher.vbs"; Description: "Launch {#MyAppName}"; Flags: nowai
         
         $setupExe = Get-ChildItem "$DEST\MExtensionServer-*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1
         if ($setupExe) {
-            Write-Host "✓ Installer created: $($setupExe.FullName)"
+            Write-Host "[OK] Installer created: $($setupExe.FullName)"
         } else {
-            Write-Host "✓ Installer compilation completed"
+            Write-Host "[OK] Installer compilation completed"
         }
     } else {
         Write-Host ""
-        Write-Host "⚠ Inno Setup not installed. Skipping installer build."
-        Write-Host "  → Download from https://jrsoftware.org/isdl.php"
+        Write-Host "[!] Inno Setup not installed. Skipping installer build."
+        Write-Host "    Download from https://jrsoftware.org/isdl.php"
     }
 }
 
 Write-Host ""
-Write-Host "Done! ✓"
+Write-Host "Done!"

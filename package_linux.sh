@@ -1,6 +1,6 @@
 #!/bin/bash
-# ─────────────────────────────────────────────────────────────────────────────
-# package_linux.sh – Build shadow JAR → custom JRE (jlink) → Linux bundle
+# --------------------------------------------------------------------------
+# package_linux.sh - Build shadow JAR -> custom JRE (jlink) -> Linux bundle
 #
 # Creates a portable .tar.gz bundle with embedded JRE.
 # Optionally creates an AppImage (requires appimagetool).
@@ -12,7 +12,7 @@
 #   ./package_linux.sh --appimage         # + AppImage
 #   ./package_linux.sh --deb              # + .deb package
 #   ./package_linux.sh --appimage --deb   # all formats
-# ─────────────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------------
 set -euo pipefail
 
 APP_NAME="MExtensionServer"
@@ -27,8 +27,8 @@ for arg in "$@"; do
   [[ "$arg" == "--deb" ]] && BUILD_DEB=true
 done
 
-# ── 0. Check tools ────────────────────────────────────────────────────────────
-echo "▸ Checking prerequisites…"
+# Check tools
+echo "[*] Checking prerequisites..."
 
 for tool in jlink java; do
   if ! command -v "$tool" &>/dev/null; then
@@ -39,20 +39,20 @@ done
 
 # Check optional tools
 if $BUILD_APPIMAGE && ! command -v appimagetool &>/dev/null; then
-  echo "  ⚠ Warning: appimagetool not found. AppImage build will be skipped."
-  echo "    → Install: https://github.com/AppImage/AppImageKit/releases"
+  echo "  [!] Warning: appimagetool not found. AppImage build will be skipped."
+  echo "      Install: https://github.com/AppImage/AppImageKit/releases"
   BUILD_APPIMAGE=false
 fi
 
 if $BUILD_DEB && ! command -v dpkg &>/dev/null; then
-  echo "  ⚠ Warning: dpkg not found. .deb build will be skipped."
-  echo "    → Install: sudo apt-get install dpkg fakeroot"
+  echo "  [!] Warning: dpkg not found. .deb build will be skipped."
+  echo "      Install: sudo apt-get install dpkg fakeroot"
   BUILD_DEB=false
 fi
 
-# ── 1. Build shadow JAR ───────────────────────────────────────────────────────
+# Build shadow JAR
 echo ""
-echo "▸ Building shadow JAR…"
+echo "[*] Building shadow JAR..."
 ./gradlew shadowJar
 
 JAR_FILE=$(ls server/build/${APP_NAME}-*.jar 2>/dev/null | head -1)
@@ -63,12 +63,12 @@ fi
 JAR_NAME=$(basename "$JAR_FILE")
 echo "  JAR: $JAR_FILE"
 
-# ── 2. Build custom JRE with jlink ───────────────────────────────────────────
+# Build custom JRE with jlink
 JRE_TMPDIR="$(pwd)/.jre_build_tmp"
 rm -rf "$JRE_TMPDIR"
 
 echo ""
-echo "▸ Building custom JRE with jlink…"
+echo "[*] Building custom JRE with jlink..."
 jlink \
   --add-modules \
   java.base,java.compiler,java.datatransfer,java.desktop,java.instrument,\
@@ -85,9 +85,9 @@ jdk.unsupported.desktop,jdk.zipfs,jdk.accessibility \
 JRE_SIZE=$(du -sh "$JRE_TMPDIR" | cut -f1)
 echo "  JRE size: $JRE_SIZE"
 
-# ── 3. Assemble bundle ────────────────────────────────────────────────────────
+# Assemble bundle
 echo ""
-echo "▸ Assembling Linux bundle…"
+echo "[*] Assembling Linux bundle..."
 
 BUNDLE_DIR="$DEST/$BUNDLE_NAME"
 rm -rf "$BUNDLE_DIR"
@@ -150,18 +150,18 @@ Or use the .deb package if you built one.
 
 README_EOF
 
-echo "✓ Bundle created: $BUNDLE_DIR"
+echo "[OK] Bundle created: $BUNDLE_DIR"
 
 # ── 4. Create portable .tar.gz ────────────────────────────────────────────────
 echo ""
 echo "▸ Creating .tar.gz archive…"
 tar -C "$DEST" -czf "$DEST/$BUNDLE_NAME.tar.gz" "$(basename "$BUNDLE_DIR")"
-echo "✓ Portable archive: $DEST/$BUNDLE_NAME.tar.gz"
+echo "[OK] Portable archive: $DEST/$BUNDLE_NAME.tar.gz"
 
-# ── 5. Optional: Create AppImage ──────────────────────────────────────────────
+# Optional: Create AppImage
 if $BUILD_APPIMAGE; then
   echo ""
-  echo "▸ Creating AppImage…"
+  echo "[*] Creating AppImage..."
 
   APPIMAGE_DIR="$(mktemp -d)"
   APP_DIR="$APPIMAGE_DIR/$APP_NAME.AppDir"
@@ -195,13 +195,13 @@ DESKTOP_EOF
   chmod +x "$APPIMAGE_OUTPUT"
 
   rm -rf "$APPIMAGE_DIR"
-  echo "✓ AppImage: $APPIMAGE_OUTPUT"
+  echo "[OK] AppImage: $APPIMAGE_OUTPUT"
 fi
 
-# ── 6. Optional: Create .deb package ──────────────────────────────────────────
+# Optional: Create .deb package
 if $BUILD_DEB; then
   echo ""
-  echo "▸ Creating .deb package…"
+  echo "[*] Creating .deb package..."
 
   DEB_TMPDIR="$(mktemp -d)"
   DEB_DIR="$DEB_TMPDIR/mextensionserver-1.0.0"
@@ -242,9 +242,9 @@ POSTINST_EOF
   fakeroot dpkg-deb --build "$DEB_DIR" "$DEB_OUTPUT"
 
   rm -rf "$DEB_TMPDIR"
-  echo "✓ Debian package: $DEB_OUTPUT"
-  echo "   Install with: sudo dpkg -i $DEB_OUTPUT"
+  echo "[OK] Debian package: $DEB_OUTPUT"
+  echo "     Install with: sudo dpkg -i $DEB_OUTPUT"
 fi
 
 echo ""
-echo "✓ Linux packaging complete!"
+echo "[OK] Linux packaging complete!"

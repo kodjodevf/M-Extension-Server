@@ -1,6 +1,6 @@
 #!/bin/bash
-# ─────────────────────────────────────────────────────────────────────────────
-# package_mac.sh – Build shadow JAR → custom JRE (jlink) → macOS .app bundle
+# --------------------------------------------------------------------------
+# package_mac.sh - Build shadow JAR -> custom JRE (jlink) -> macOS .app bundle
 #
 # No jpackage required. The full JRE is embedded inside the .app.
 #
@@ -8,7 +8,7 @@
 #   chmod +x package_mac.sh
 #   ./package_mac.sh            # builds .app in dist/
 #   ./package_mac.sh --dmg      # also wraps the .app in a .dmg via hdiutil
-# ─────────────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------------
 set -euo pipefail
 
 APP_NAME="MExtensionServer"
@@ -23,7 +23,7 @@ done
 
 ICON_SRC="server/src/main/resources/icon-red.png"
 
-# ── 0. Check tools ────────────────────────────────────────────────────────────
+# Check tools
 for tool in jlink java sips iconutil; do
   if ! command -v "$tool" &>/dev/null; then
     echo "Error: '$tool' not found. Make sure JAVA_HOME points to a JDK 17+."
@@ -31,8 +31,8 @@ for tool in jlink java sips iconutil; do
   fi
 done
 
-# ── 1. Build shadow JAR ───────────────────────────────────────────────────────
-echo "▸ Building shadow JAR…"
+# Build shadow JAR
+echo "[*] Building shadow JAR..."
 ./gradlew shadowJar
 
 JAR_FILE=$(ls server/build/${APP_NAME}-*.jar 2>/dev/null | head -1)
@@ -43,11 +43,11 @@ fi
 JAR_NAME=$(basename "$JAR_FILE")
 echo "  JAR: $JAR_FILE"
 
-# ── 2. Convert PNG icon → ICNS ───────────────────────────────────────────────
+# Convert PNG icon -> ICNS
 ICNS_FILE=""
 if [[ -f "$ICON_SRC" ]]; then
   echo ""
-  echo "▸ Converting icon to .icns…"
+  echo "[*] Converting icon to .icns..."
   ICONSET_DIR="$(mktemp -d)/AppIcon.iconset"
   mkdir -p "$ICONSET_DIR"
   # Generate all required sizes from the source PNG
@@ -60,15 +60,15 @@ if [[ -f "$ICON_SRC" ]]; then
   rm -rf "$(dirname "$ICONSET_DIR")"
   echo "  Icon: $ICNS_FILE"
 else
-  echo "  Warning: icon not found at $ICON_SRC — skipping"
+  echo "  Warning: icon not found at $ICON_SRC - skipping"
 fi
 
-# ── 3. Build custom JRE with jlink ───────────────────────────────────────────
+# Build custom JRE with jlink
 JRE_TMPDIR="$(pwd)/.jre_build_tmp"
 rm -rf "$JRE_TMPDIR"
 
 echo ""
-echo "▸ Building custom JRE with jlink…"
+echo "[*] Building custom JRE with jlink..."
 jlink \
   --add-modules \
   java.base,java.compiler,java.datatransfer,java.desktop,java.instrument,\
@@ -84,9 +84,9 @@ jdk.unsupported.desktop,jdk.zipfs,jdk.accessibility \
 
 echo "  JRE size: $(du -sh "$JRE_TMPDIR" | cut -f1)"
 
-# ── 4. Assemble .app bundle ───────────────────────────────────────────────────
+# Assemble .app bundle
 echo ""
-echo "▸ Assembling ${APP_NAME}.app…"
+echo "[*] Assembling ${APP_NAME}.app..."
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
@@ -167,13 +167,13 @@ echo ""
 echo "✓  Bundle created: $APP_BUNDLE"
 echo "   Run with:  open \"$APP_BUNDLE\""
 
-# ── 5. Optional: create .dmg via hdiutil ─────────────────────────────────────
+# Optional: create .dmg via hdiutil
 if $CREATE_DMG; then
   DMG_PATH="$DEST/${APP_NAME}.dmg"
   STAGING="$(mktemp -d)"
 
   echo ""
-  echo "▸ Building DMG…"
+  echo "[*] Building DMG..."
   cp -R "$APP_BUNDLE" "$STAGING/"
 
   # Create symlink so users can drag to Applications
