@@ -246,7 +246,7 @@ if ($BuildInstaller) {
             'Compression=lzma',
             'SolidCompression=yes',
             "OutputDir=$distAbsPath",
-            'OutputBaseName=MExtensionServer-{#MyAppVersion}-setup-x64',
+            'OutputBaseFilename=MExtensionServer-{#MyAppVersion}-setup-x64',
             'ArchitecturesAllowed=x64',
             'ArchitecturesInstallIn64BitMode=x64',
             '',
