@@ -14,157 +14,180 @@ jobs:
     name: Validate Gradle Wrapper
     runs-on: ubuntu-latest
     steps:
-      - name: Clone repo
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@v5
+        uses: gradle/actions/wrapper-validation@v3
 
-  build-jar:
-    name: Build Jar
+  build-macos:
+    name: Build macOS (.dmg)
     needs: check_wrapper
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up JDK
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "temurin"
 
       - name: Generate android.jar
-        run: ./AndroidCompat/getAndroid.sh
+        run: bash ./AndroidCompat/getAndroid.sh
 
-      - name: Build project (shadowJar)
-        run: ./gradlew :server:shadowJar --no-daemon --stacktrace
+      - name: Build macOS bundle and DMG
+        run: |
+          chmod +x ./package_mac.sh
+          ./package_mac.sh
 
-      - name: Upload Jar
-        uses: actions/upload-artifact@v5
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: jar
-          path: server/build/*.jar
+          name: macos-bundles
+          path: |
+            dist/MExtensionServer.dmg
           if-no-files-found: error
 
-  jlink:
-    name: Create platform JREs
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux-x64
-          - os: windows-latest
-            name: windows-x64
-          - os: macos-14
-            name: macOS-arm64
-          - os: macos-15-intel
-            name: macOS-x64
-
+  build-windows:
+    name: Build Windows (.zip + .exe)
+    needs: check_wrapper
+    runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up JDK
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "temurin"
 
-      - name: Make build_jre.sh executable
-        run: chmod +x ./build_jre.sh
+      - name: Install zip (Windows)
+        run: choco install zip -y
+        shell: powershell
 
-      - name: Generate JRE using build_jre.sh
+      - name: Generate android.jar
+        run: bash ./AndroidCompat/getAndroid.sh
         shell: bash
+
+      - name: Build Windows bundle
         run: |
-          ./build_jre.sh
+          powershell -ExecutionPolicy Bypass -File ".\package_windows.ps1" -BuildInstaller
+        shell: powershell
 
-      - name: Upload JRE package
-        uses: actions/upload-artifact@v5
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}-jre
-          path: jre
+          name: windows-bundles
+          path: |
+            dist/MExtensionServer*-setup-x64.exe
+            dist/MExtensionServer-Windows-x64.zip
+          if-no-files-found: error
 
-  bundle:
-    name: Bundle JAR + JRE per platform
-    needs: [build-jar, jlink]
+  build-linux:
+    name: Build Linux (.tar.gz + deb + AppImage)
+    needs: check_wrapper
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-x64
-            jre: linux-x64
-          - name: macOS-x64
-            jre: macOS-x64
-          - name: macOS-arm64
-            jre: macOS-arm64
-          - name: windows-x64
-            jre: windows-x64
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
-      - name: Download Jar
-        uses: actions/download-artifact@v6
+      - name: Set up JDK
+        uses: actions/setup-java@v4
         with:
-          name: jar
-          path: server/build
+          java-version: "21"
+          distribution: "temurin"
 
-      - name: Download JRE for platform
-        uses: actions/download-artifact@v6
-        with:
-          name: ${{ matrix.jre }}-jre
-          path: jre
+      - name: Generate android.jar
+        run: bash ./AndroidCompat/getAndroid.sh
 
-      - name: Prepare bundle
-        shell: bash
+      - name: Install AppImage dependencies
         run: |
-          mkdir -p upload/jre
-          cp server/build/*.jar upload/
-          if [ -d "jre" ]; then
-            mv jre upload/jre/
-          fi
-          ARCHIVE_NAME="${{ matrix.name }}-bundle.zip"
-          cd upload
-          zip -r ../${ARCHIVE_NAME} .
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
 
-      - name: Upload bundled artifact
-        uses: actions/upload-artifact@v5
+      - name: Build Linux bundle
+        run: |
+          chmod +x ./package_linux.sh
+          ./package_linux.sh
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}-bundle.zip
+          name: linux-bundles
+          path: |
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.deb
           if-no-files-found: error
 
   release:
-    needs: bundle
+    name: Create GitHub Release
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v6
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: linux-x64
-          path: release
+          name: macos-bundles
+          path: release/macos
 
-      - uses: actions/download-artifact@v6
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: macOS-x64
-          path: release
+          name: windows-bundles
+          path: release/windows
 
-      - uses: actions/download-artifact@v6
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: macOS-arm64
-          path: release
+          name: linux-bundles
+          path: release/linux
 
-      - uses: actions/download-artifact@v6
-        with:
-          name: windows-x64
-          path: release
+      - name: Rename and organize artifacts
+        shell: bash
+        run: |
+          cd release
+          mkdir -p final
 
-      - name: Upload release
+          # macOS
+          if [ -f "macos/MExtensionServer.dmg" ]; then
+            mv macos/MExtensionServer.dmg final/MExtensionServer-macOS.dmg
+          fi
+
+          # Windows
+          if [ -f "windows/MExtensionServer-Windows-x64.zip" ]; then
+            mv windows/MExtensionServer-Windows-x64.zip final/MExtensionServer-Windows-x64.zip
+          fi
+          # Add the .exe installer
+          EXE_FILE=$(find windows -name "MExtensionServer*-setup-x64.exe" | head -n 1)
+          if [ -n "$EXE_FILE" ]; then
+            mv "$EXE_FILE" final/MExtensionServer-Windows-Setup.exe
+          fi
+
+          # Linux
+          if [ -f "linux/MExtensionServer-Linux-x64.tar.gz" ]; then
+            mv linux/MExtensionServer-Linux-x64.tar.gz final/MExtensionServer-Linux-x64.tar.gz
+          fi
+          if [ -f "linux/MExtensionServer-x86_64.AppImage" ]; then
+            mv linux/MExtensionServer-x86_64.AppImage final/MExtensionServer-x86_64.AppImage
+          fi
+          # Add the .deb package
+          DEB_FILE=$(find linux -name "*.deb" | head -n 1)
+          if [ -n "$DEB_FILE" ]; then
+            mv "$DEB_FILE" final/MExtensionServer-Linux.deb
+          fi
+
+          ls -la final/
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          files: release/*
+          files: release/final/*
+          draft: false
+          prerelease: false
