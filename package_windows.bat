@@ -1,7 +1,7 @@
 @echo off
-REM ─────────────────────────────────────────────────────────────────────────────
-REM package_windows.bat – Wrapper to run PowerShell packaging script
-REM ─────────────────────────────────────────────────────────────────────────────
+REM --------------------------------------------------------------------------
+REM package_windows.bat - Wrapper to run PowerShell packaging script
+REM --------------------------------------------------------------------------
 
 setlocal enabledelayedexpansion
 
