@@ -29,6 +29,8 @@ class MExtensionServerController {
 
     fun isRunning(): Boolean = server?.isAlive == true
 
+    fun getPort(): Int = server?.listeningPort ?: 0
+
     private inner class WebServer(
         port: Int,
     ) : NanoHTTPD(port) {

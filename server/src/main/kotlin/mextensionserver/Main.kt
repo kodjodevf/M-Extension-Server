@@ -11,6 +11,7 @@ package mextensionserver
 import eu.kanade.tachiyomi.App
 import io.github.oshai.kotlinlogging.KotlinLogging
 import mextensionserver.controller.MExtensionServerController
+import mextensionserver.ui.ServerWindow
 import org.kodein.di.DI
 import org.kodein.di.conf.global
 import xyz.nulldev.androidcompat.AndroidCompat
@@ -18,22 +19,39 @@ import xyz.nulldev.androidcompat.AndroidCompatInitializer
 import xyz.nulldev.ts.config.ConfigKodeinModule
 import java.net.CookieHandler
 import java.net.CookieManager
+import javax.swing.SwingUtilities
 
 private val logger = KotlinLogging.logger {}
 private val androidCompat by lazy { AndroidCompat() }
 
 @Suppress("BlockingMethodInNonBlockingContext")
 fun main(args: Array<String>) {
-    val port = args.getOrNull(0)?.toIntOrNull() ?: 0
-    val appDir = args.getOrNull(1)
+    val useUI = "--ui" in args
+    val filteredArgs = args.filter { it != "--ui" }
+    val port = filteredArgs.getOrNull(0)?.toIntOrNull() ?: 0
+    val appDir = filteredArgs.getOrNull(1)
+
+    if (useUI) {
+        // Must be set before any AWT/Swing initialisation
+        System.setProperty("apple.awt.application.name", "MExtension Server")
+        System.setProperty("apple.laf.useScreenMenuBar", "true")
+    }
+
     CookieHandler.setDefault(CookieManager())
     initApplication(appDir)
-    val controller = MExtensionServerController()
-    controller.start(port)
-    Runtime.getRuntime().addShutdownHook(Thread { controller.stop() })
-    // Keep running
-    while (controller.isRunning()) {
-        Thread.sleep(1000)
+
+    if (useUI) {
+        // Show the Swing window; the AWT event-dispatch thread (non-daemon)
+        // keeps the JVM alive until the window is closed.
+        SwingUtilities.invokeLater { ServerWindow().show() }
+    } else {
+        val controller = MExtensionServerController()
+        controller.start(port)
+        Runtime.getRuntime().addShutdownHook(Thread { controller.stop() })
+        // Keep running
+        while (controller.isRunning()) {
+            Thread.sleep(1000)
+        }
     }
 }
 

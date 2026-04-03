@@ -1,0 +1,118 @@
+name: Build All Platforms
+
+on:
+    push:
+        branches:
+            - main
+        paths-ignore:
+            - "*.md"
+            - ".gitignore"
+            - "docs/**"
+
+jobs:
+    check_wrapper:
+        name: Validate Gradle Wrapper
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Validate Gradle Wrapper
+              uses: gradle/actions/wrapper-validation@v3
+
+    build-macos:
+        name: Build macOS
+        needs: check_wrapper
+        runs-on: macos-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  java-version: "21"
+                  distribution: "temurin"
+
+            - name: Generate android.jar
+              run: bash ./AndroidCompat/getAndroid.sh
+
+            - name: Build macOS bundle
+              run: |
+                  chmod +x ./package_mac.sh
+                  ./package_mac.sh --dmg
+
+            - name: Upload macOS artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: macos
+                  path: dist/MExtensionServer.dmg
+
+    build-windows:
+        name: Build Windows
+        needs: check_wrapper
+        runs-on: windows-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  java-version: "21"
+                  distribution: "temurin"
+
+            - name: Generate android.jar
+              run: bash ./AndroidCompat/getAndroid.sh
+              shell: bash
+
+            - name: Build Windows bundle
+              run: |
+                  powershell -ExecutionPolicy Bypass -File ".\package_windows.ps1"
+              shell: powershell
+
+            - name: Upload Windows artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: windows
+                  path: dist/MExtensionServer-Windows-x64.zip
+
+    build-linux:
+        name: Build Linux
+        needs: check_wrapper
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  java-version: "21"
+                  distribution: "temurin"
+
+            - name: Generate android.jar
+              run: bash ./AndroidCompat/getAndroid.sh
+
+            - name: Install AppImage tools
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y appimage-tools || true
+
+            - name: Build Linux bundles
+              run: |
+                  chmod +x ./package_linux.sh
+                  ./package_linux.sh --appimage
+
+            - name: Upload Linux tar.gz
+              uses: actions/upload-artifact@v4
+              with:
+                  name: linux-tarball
+                  path: dist/MExtensionServer-Linux-x64.tar.gz
+
+            - name: Upload Linux AppImage
+              uses: actions/upload-artifact@v4
+              with:
+                  name: linux-appimage
+                  path: dist/MExtensionServer-x86_64.AppImage
+                  if-no-files-found: warn
