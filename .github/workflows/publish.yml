@@ -87,7 +87,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Build Linux (.tar.gz + deb)
+    name: Build Linux (.tar.gz + deb + AppImage)
     needs: check_wrapper
     runs-on: ubuntu-latest
     steps:
@@ -103,19 +103,17 @@ jobs:
       - name: Generate android.jar
         run: bash ./AndroidCompat/getAndroid.sh
 
-      - name: Install AppImage tools
+      - name: Install AppImage dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y fuse libfuse2
-          # Download appimagetool
-          curl -LO https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
-          chmod +x appimagetool-x86_64.AppImage
-          sudo mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
+          sudo apt-get install -y libfuse2
 
       - name: Build Linux bundle
         run: |
           chmod +x ./package_linux.sh
           ./package_linux.sh
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4

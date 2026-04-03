@@ -162,6 +162,17 @@ if $BUILD_APPIMAGE; then
   echo ""
   echo "[*] Creating AppImage..."
 
+  # Install appimagetool if missing (useful for CI)
+  if ! command -v appimagetool &>/dev/null; then
+    echo "  [!] appimagetool not found. Downloading..."
+    curl -Lo appimagetool-x86_64.AppImage https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+    chmod +x appimagetool-x86_64.AppImage
+    # We use the local binary to avoid sudo issues
+    APPIMAGE_TOOL="./appimagetool-x86_64.AppImage"
+  else
+    APPIMAGE_TOOL="appimagetool"
+  fi
+
   APPIMAGE_DIR="$(mktemp -d)"
   APP_DIR="$APPIMAGE_DIR/$APP_NAME.AppDir"
   mkdir -p "$APP_DIR/usr/bin" "$APP_DIR/usr/share/applications" "$APP_DIR/usr/share/pixmaps"
@@ -190,10 +201,16 @@ DESKTOP_EOF
 
   # Create AppImage
   APPIMAGE_OUTPUT="$DEST/${APP_NAME}-x86_64.AppImage"
-  appimagetool "$APP_DIR" "$APPIMAGE_OUTPUT" -n
+  # Use ARCH=x86_64 for compatibility and ensure we don't need fuse with --appimage-extract-and-run if needed
+  # However, we installed libfuse2 so it should be fine.
+  ARCH=x86_64 $APPIMAGE_TOOL "$APP_DIR" "$APPIMAGE_OUTPUT" -n
   chmod +x "$APPIMAGE_OUTPUT"
 
   rm -rf "$APPIMAGE_DIR"
+  # Clean up the tool if we downloaded it
+  if [[ "$APPIMAGE_TOOL" == "./appimagetool-x86_64.AppImage" ]]; then
+    rm -f "./appimagetool-x86_64.AppImage"
+  fi
   echo "[OK] AppImage: $APPIMAGE_OUTPUT"
 fi
 
