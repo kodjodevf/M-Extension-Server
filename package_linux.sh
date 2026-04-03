@@ -19,7 +19,7 @@ BUNDLE_NAME="MExtensionServer-Linux-x64"
 DEST="dist"
 BUILD_APPIMAGE=true
 BUILD_DEB=true
-ICON_SRC="server/src/main/resources/icon-red.png"
+ICON_SRC="server/src/main/resources/icon-black.png"
 
 for arg in "$@"; do
   [[ "$arg" == "--no-appimage" ]] && BUILD_APPIMAGE=false

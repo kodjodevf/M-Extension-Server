@@ -22,7 +22,7 @@ for arg in "$@"; do
   [[ "$arg" == "--no-dmg" ]] && CREATE_DMG=false
 done
 
-ICON_SRC="server/src/main/resources/icon-red.png"
+ICON_SRC="server/src/main/resources/icon-black.png"
 
 # Check tools
 for tool in jlink java sips iconutil; do

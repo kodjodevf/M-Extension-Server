@@ -18,7 +18,7 @@ $ErrorActionPreference = "Stop"
 $APP_NAME = "MExtensionServer"
 $BUNDLE_NAME = "MExtensionServer-Windows-x64"
 $DEST = "dist"
-$ICON_SRC = "server/src/main/resources/icon-red.png"
+$ICON_SRC = "server/src/main/resources/icon-black.png"
 
 # Check tools
 Write-Host "[*] Checking prerequisites..."
@@ -228,10 +228,6 @@ if ($BuildInstaller) {
         $distAbsPath = (Get-Item $DEST).FullName
         
         # Create .iss script
-        $distAbsPath = [System.String]::Empty
-        if (Test-Path $DEST) {
-            $distAbsPath = (Get-Item $DEST).FullName
-        }
         $issLines = @(
             '#define MyAppName "MExtension Server"',
             '#define MyAppVersion "1.0.0"',
@@ -247,10 +243,10 @@ if ($BuildInstaller) {
             'DefaultGroupName={#MyAppName}',
             'AllowNoIcons=yes',
             'WizardStyle=modern',
-            'CompressLevel=max',
+            'Compression=lzma',
             'SolidCompression=yes',
             "OutputDir=$distAbsPath",
-            'OutputBaseFilename=MExtensionServer-{#MyAppVersion}-setup-x64',
+            'OutputBaseName=MExtensionServer-{#MyAppVersion}-setup-x64',
             'ArchitecturesAllowed=x64',
             'ArchitecturesInstallIn64BitMode=x64',
             '',

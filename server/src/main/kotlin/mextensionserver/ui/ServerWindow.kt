@@ -58,7 +58,7 @@ class ServerWindow {
     private fun applyAppIcon() {
         val img: Image =
             runCatching {
-                ImageIO.read(ServerWindow::class.java.getResourceAsStream("/icon-red.png"))
+                ImageIO.read(ServerWindow::class.java.getResourceAsStream("/icon-black.png"))
             }.getOrNull() ?: return
 
         // Dock icon (macOS)
