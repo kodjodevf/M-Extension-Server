@@ -2,6 +2,7 @@
 
 package eu.kanade.tachiyomi.source.model
 
+import kotlinx.serialization.json.JsonObject
 import java.io.Serializable
 
 interface SManga : Serializable {
@@ -22,6 +23,11 @@ interface SManga : Serializable {
     var thumbnail_url: String?
 
     var update_strategy: UpdateStrategy
+
+    /**
+     * Source-specific metadata introduced by TachiyomiX 1.6.
+     */
+    var memo: JsonObject
 
     var initialized: Boolean
 
@@ -47,6 +53,7 @@ interface SManga : Serializable {
         }
 
         status = other.status
+        runCatching { other.memo }.getOrNull()?.let { memo = it }
 
         if (!initialized) {
             initialized = other.initialized

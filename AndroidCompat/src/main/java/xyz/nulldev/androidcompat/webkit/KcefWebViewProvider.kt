@@ -109,6 +109,7 @@ class KcefWebViewProvider(
 
     private var kcefClient: KCEFClient? = null
     private var browser: KCEFBrowser? = null
+    private var initializationFailure: Throwable? = null
 
     private val handler = Handler(view.webViewLooper)
 
@@ -530,20 +531,30 @@ class KcefWebViewProvider(
     ) {
         Log.v(TAG, "KcefWebViewProvider: initialize")
         destroy()
-        kcefClient =
-            KCEF.newClientBlocking().apply {
-                addDisplayHandler(DisplayHandler())
-                addLoadHandler(LoadHandler())
-                addRequestHandler(RequestHandler())
-                addPermissionHandler(PermissionHandler())
+        initializationFailure = null
+        try {
+            kcefClient =
+                KCEF.newClientBlocking().apply {
+                    addDisplayHandler(DisplayHandler())
+                    addLoadHandler(LoadHandler())
+                    addRequestHandler(RequestHandler())
+                    addPermissionHandler(PermissionHandler())
 
-                val config = CefMessageRouter.CefMessageRouterConfig()
-                config.jsQueryFunction = QUERY_FN
-                config.jsCancelFunction = QUERY_CANCEL_FN
-                addMessageRouter(CefMessageRouter.create(config, MessageRouterHandler()))
-            }
+                    val config = CefMessageRouter.CefMessageRouterConfig()
+                    config.jsQueryFunction = QUERY_FN
+                    config.jsCancelFunction = QUERY_CANCEL_FN
+                    addMessageRouter(CefMessageRouter.create(config, MessageRouterHandler()))
+                }
+        } catch (error: Exception) {
+            initializationFailure = error
+            Log.w(TAG, "Desktop WebView is unavailable; failing this solve immediately")
+            return
+        }
         initHandler.init(this)
     }
+
+    private fun requireKcefClient(): KCEFClient =
+        kcefClient ?: throw IllegalStateException("Desktop WebView is unavailable", initializationFailure)
 
     // Deprecated - should never be called
     override fun setHorizontalScrollbarOverlay(overlay: Boolean): Unit = throw RuntimeException("Stub!")
@@ -614,7 +625,7 @@ class KcefWebViewProvider(
         chromeClient.onProgressChanged(view, 0)
         initialRequestData = InitialRequestData(additionalHttpHeaders = additionalHttpHeaders)
         browser =
-            kcefClient!!
+            requireKcefClient()
                 .createBrowser(
                     loadUrl,
                     CefRendering.OFFSCREEN,
@@ -638,7 +649,7 @@ class KcefWebViewProvider(
         chromeClient.onProgressChanged(view, 0)
         initialRequestData = InitialRequestData(myPostData = postData)
         browser =
-            kcefClient!!
+            requireKcefClient()
                 .createBrowser(
                     url,
                     CefRendering.OFFSCREEN,
@@ -672,13 +683,13 @@ class KcefWebViewProvider(
             (
                 baseUrl?.let { url ->
                     urlHttpMapping.put(url.trimEnd('/'), data)
-                    kcefClient!!.createBrowser(
+                    requireKcefClient().createBrowser(
                         url,
                         CefRendering.OFFSCREEN,
                     )
                 }
                     ?: run {
-                        kcefClient!!.createBrowserWithHtml(
+                        requireKcefClient().createBrowserWithHtml(
                             data,
                             KCEFBrowser.BLANK_URI,
                             CefRendering.OFFSCREEN,

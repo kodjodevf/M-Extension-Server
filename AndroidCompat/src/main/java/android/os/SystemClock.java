@@ -17,7 +17,6 @@ package android.os;
 
 import android.annotation.NonNull;
 
-import java.lang.management.ManagementFactory;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.ZoneOffset;
@@ -149,7 +148,7 @@ public final class SystemClock {
      * @return milliseconds of non-sleep uptime since boot.
      */
     public static long uptimeMillis() {
-        return ManagementFactory.getRuntimeMXBean().getUptime();
+        return System.nanoTime() / 1_000_000L;
     }
 
     /**

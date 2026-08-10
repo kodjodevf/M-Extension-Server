@@ -87,7 +87,11 @@ data class JPreference(
 
 fun SManga.toJManga(): JManga =
     JManga(
-        url = runCatching { this.url }.getOrDefault(""),
+        url =
+            BridgeMemo.encode(
+                runCatching { this.url }.getOrDefault(""),
+                runCatching { this.memo }.getOrDefault(kotlinx.serialization.json.JsonObject(emptyMap())),
+            ),
         title = runCatching { this.title }.getOrDefault(""),
         artist = runCatching { this.artist }.getOrNull(),
         author = runCatching { this.author }.getOrNull(),
@@ -100,7 +104,11 @@ fun SManga.toJManga(): JManga =
 
 fun SChapter.toJChapter(): JChapter =
     JChapter(
-        url = runCatching { this.url }.getOrDefault(""),
+        url =
+            BridgeMemo.encode(
+                runCatching { this.url }.getOrDefault(""),
+                runCatching { this.memo }.getOrDefault(kotlinx.serialization.json.JsonObject(emptyMap())),
+            ),
         name = runCatching { this.name }.getOrDefault(""),
         date_upload = runCatching { this.date_upload }.getOrDefault(0L),
         chapter_number = runCatching { this.chapter_number }.getOrDefault(0f),

@@ -12,8 +12,8 @@
 
 #define MyAppName "MExtension Server"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "kodjodevf"
-#define MyAppURL "https://github.com/kodjodevf/m-extension-server"
+#define MyAppPublisher "1Selxo"
+#define MyAppURL "https://github.com/1Selxo/M-Extension-Server"
 #define SourceBundle "dist\MExtensionServer-Windows-x64"
 
 [Setup]

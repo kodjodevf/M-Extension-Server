@@ -1,7 +1,8 @@
 package mextensionserver.model
 
 data class DataBody(
-    val data: String, // Base64 encoded APK data
+    val data: String? = null, // Base64 encoded APK data
+    val extensionId: String? = null, // Server-issued SHA-256 handle
     val method: String,
     val page: Int? = null,
     val search: String? = null,

@@ -1,9 +1,14 @@
 package eu.kanade.tachiyomi.source
 
+import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.util.lang.awaitSingle
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import rx.Observable
 
 /**
@@ -22,6 +27,65 @@ interface Source {
 
     val lang: String
         get() = ""
+
+    /**
+     * Whether the source has support for latest updates.
+     */
+    val supportsLatest: Boolean
+        get() = false
+
+    /**
+     * Returns the list of filters for the source.
+     */
+    fun getFilterList(): FilterList = FilterList()
+
+    /**
+     * Get a page with a list of manga.
+     *
+     * @since tachiyomix 1.6
+     */
+    suspend fun getPopularManga(page: Int): MangasPage = throw UnsupportedOperationException()
+
+    /**
+     * Get a page with a list of latest manga updates.
+     *
+     * @since tachiyomix 1.6
+     */
+    suspend fun getLatestUpdates(page: Int): MangasPage = throw UnsupportedOperationException()
+
+    /**
+     * Get a page with a list of manga matching [query] and [filters].
+     *
+     * @since tachiyomix 1.6
+     */
+    suspend fun getSearchManga(
+        page: Int,
+        query: String,
+        filters: FilterList,
+    ): MangasPage = throw UnsupportedOperationException()
+
+    /**
+     * Fetch updated manga details, chapters, or both.
+     *
+     * The default implementation preserves compatibility with pre-1.6 sources
+     * that implement the split detail and chapter APIs.
+     *
+     * @since tachiyomix 1.6
+     */
+    suspend fun getMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate =
+        supervisorScope {
+            val updatedManga = if (fetchDetails) async { getMangaDetails(manga) } else null
+            val updatedChapters = if (fetchChapters) async { getChapterList(manga) } else null
+            SMangaUpdate(
+                updatedManga?.await() ?: manga,
+                updatedChapters?.await() ?: chapters,
+            )
+        }
 
     /**
      * Get the updated details for a manga.

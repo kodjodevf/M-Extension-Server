@@ -16,15 +16,15 @@ import com.googlecode.dex2jar.tools.BaksmaliBaseDexExceptionHandler
 import io.github.oshai.kotlinlogging.KotlinLogging
 import net.dongliu.apk.parser.ApkFile
 import net.dongliu.apk.parser.ApkParsers
-import org.w3c.dom.Element
-import org.w3c.dom.Node
-import xyz.nulldev.androidcompat.pm.InstalledPackage.Companion.toList
 import xyz.nulldev.androidcompat.pm.toPackageInfo
+import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
 import java.io.File
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
-import javax.xml.parsers.DocumentBuilderFactory
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 object PackageTools {
     private val logger = KotlinLogging.logger {}
@@ -49,6 +49,7 @@ object PackageTools {
         val jarFilePath = jarFile.toPath()
         val reader = MultiDexFileReader.open(Files.readAllBytes(dexFile.toPath()))
         val handler = BaksmaliBaseDexExceptionHandler()
+        val translated = ByteArrayOutputStream()
         Dex2jar
             .from(reader)
             .withExceptionHandler(handler)
@@ -60,7 +61,8 @@ object PackageTools {
             .noCode(false)
             .skipExceptions(false)
             .dontSanitizeNames(true)
-            .to(jarFilePath)
+            .doTranslate(translated)
+        writeTranslatedClasses(translated, jarFile)
         if (handler.hasException()) {
             val errorFile: Path =
                 jarFilePath.parent.resolve("${dexFile.nameWithoutExtension}-error.txt")
@@ -80,54 +82,96 @@ object PackageTools {
         }
     }
 
+    private fun writeTranslatedClasses(
+        translated: ByteArrayOutputStream,
+        jarFile: File,
+    ) {
+        val seenEntries = mutableSetOf<String>()
+        DataInputStream(translated.toByteArray().inputStream()).use { input ->
+            ZipOutputStream(jarFile.outputStream().buffered()).use { output ->
+                while (input.available() > 0) {
+                    val nameLength = input.readInt()
+                    require(nameLength in 1..1_048_576) {
+                        "Invalid translated class name length: $nameLength"
+                    }
+                    val name = input.readNBytes(nameLength).toString(Charsets.UTF_8)
+                    val classLength = input.readInt()
+                    require(classLength in 1..translated.size()) {
+                        "Invalid translated class size for $name: $classLength"
+                    }
+                    val classBytes = input.readNBytes(classLength)
+                    require(classBytes.size == classLength) {
+                        "Incomplete translated class data for $name"
+                    }
+
+                    val entryName = "$name.class"
+                    if (!seenEntries.add(entryName)) continue
+                    output.putNextEntry(ZipEntry(entryName))
+                    output.write(classBytes)
+                    output.closeEntry()
+                }
+            }
+        }
+    }
+
     /** A modified version of `xyz.nulldev.androidcompat.pm.InstalledPackage.info` */
     fun getPackageInfo(apkFilePath: String): PackageInfo {
         val apk = File(apkFilePath)
         return ApkParsers.getMetaInfo(apk).toPackageInfo(apk).apply {
-            val parsed = ApkFile(apk)
-            val dbFactory = DocumentBuilderFactory.newInstance()
-            val dBuilder = dbFactory.newDocumentBuilder()
-            val doc =
-                parsed.manifestXml.byteInputStream().use {
-                    dBuilder.parse(it)
-                }
+            ApkFile(apk).use { parsed ->
+                logger.trace { parsed.manifestXml }
 
-            logger.trace { parsed.manifestXml }
-
-            applicationInfo.metaData =
-                Bundle().apply {
-                    val appTag = doc.getElementsByTagName("application").item(0)
-
-                    appTag
-                        ?.childNodes
-                        ?.toList()
-                        .orEmpty()
-                        .asSequence()
-                        .filter {
-                            it.nodeType == Node.ELEMENT_NODE
-                        }.map {
-                            it as Element
-                        }.filter {
-                            it.tagName == "meta-data"
-                        }.forEach {
-                            putString(
-                                it.attributes.getNamedItem("android:name").nodeValue,
-                                it.attributes.getNamedItem("android:value").nodeValue,
-                            )
+                applicationInfo.metaData =
+                    Bundle().apply {
+                        manifestMetadata(parsed.manifestXml).forEach { (name, value) ->
+                            putString(name, value)
                         }
-                }
+                    }
 
-            signatures =
-                (
-                    parsed.apkSingers.flatMap { it.certificateMetas }
-                    // + parsed.apkV2Singers.flatMap { it.certificateMetas }
-                ) // Blocked by: https://github.com/hsiafan/apk-parser/issues/72
-                    .map { Signature(it.data) }
-                    .toTypedArray()
+                signatures =
+                    (
+                        parsed.apkSingers.flatMap { it.certificateMetas }
+                        // + parsed.apkV2Singers.flatMap { it.certificateMetas }
+                    ) // Blocked by: https://github.com/hsiafan/apk-parser/issues/72
+                        .map { Signature(it.data) }
+                        .toTypedArray()
+            }
         }
     }
 
-    val jarLoaderMap = mutableMapOf<String, URLClassLoader>()
+    private fun manifestMetadata(manifestXml: String): Map<String, String> {
+        val metadata = linkedMapOf<String, String>()
+        val attributePattern =
+            Regex("""(?:android:)?(name|value)\s*=\s*(["'])(.*?)\2""")
+
+        Regex("""<meta-data\b[^>]*>""")
+            .findAll(manifestXml)
+            .forEach { tag ->
+                val attributes =
+                    attributePattern
+                        .findAll(tag.value)
+                        .associate { match ->
+                            match.groupValues[1] to decodeXmlAttribute(match.groupValues[3])
+                        }
+                val name = attributes["name"] ?: return@forEach
+                val value = attributes["value"] ?: return@forEach
+                metadata[name] = value
+            }
+        return metadata
+    }
+
+    private fun decodeXmlAttribute(value: String): String =
+        value
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+
+    data class LoadedSource(
+        val instance: Any,
+        val classLoader: URLClassLoader,
+    )
 
     /**
      * loads the extension main class called [className] from the jar located at [jarPath]
@@ -137,11 +181,19 @@ object PackageTools {
         jarFile: File,
         className: String,
         apkFile: File? = null,
-    ): Any {
+    ): LoadedSource {
         val urls = mutableListOf(jarFile.toURI().toURL())
         apkFile?.let { urls.add(it.toURI().toURL()) } // Add APK for resources
         val classLoader = URLClassLoader(urls.toTypedArray(), PackageTools::class.java.classLoader)
-        val classToLoad = Class.forName(className, false, classLoader)
-        return classToLoad.getDeclaredConstructor().newInstance()
+        try {
+            val classToLoad = Class.forName(className, false, classLoader)
+            return LoadedSource(
+                instance = classToLoad.getDeclaredConstructor().newInstance(),
+                classLoader = classLoader,
+            )
+        } catch (error: Throwable) {
+            classLoader.close()
+            throw error
+        }
     }
 }

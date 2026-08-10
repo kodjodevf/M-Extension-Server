@@ -5,6 +5,8 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * An OkHttp interceptor that handles rate limiting.
@@ -25,6 +27,17 @@ fun OkHttpClient.Builder.rateLimit(
     period: Long = 1,
     unit: TimeUnit = TimeUnit.SECONDS,
 ) = addInterceptor(RateLimitInterceptor(permits, period, unit))
+
+/**
+ * Duration-based overload used by current Aniyomi extensions.
+ *
+ * Keep this overload alongside the legacy TimeUnit API: Kotlin's Duration value
+ * class gives it the JVM name expected by extensions compiled against lib 16+.
+ */
+fun OkHttpClient.Builder.rateLimit(
+    permits: Int,
+    period: Duration = 1.seconds,
+) = addInterceptor(RateLimitInterceptor(permits, period.inWholeMilliseconds, TimeUnit.MILLISECONDS))
 
 private class RateLimitInterceptor(
     private val permits: Int,

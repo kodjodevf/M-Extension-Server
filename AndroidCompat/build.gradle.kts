@@ -16,6 +16,8 @@ plugins {
     )
 }
 
+val iosRuntime = providers.gradleProperty("iosRuntime").map(String::toBoolean).getOrElse(false)
+
 dependencies {
     // Shared
     implementation(libs.bundles.shared)
@@ -47,4 +49,19 @@ dependencies {
     // OpenJDK lacks native JPEG encoder and native WEBP decoder
     implementation(libs.bundles.twelvemonkeys)
     implementation(libs.imageio.webp)
+
+    // iOS has no Chromium runtime. Keep only KCEF's compile-time API so the
+    // embedded server never resolves JCEF/JOGL from the desktop-only host.
+    if (iosRuntime) {
+        compileOnly(libs.kcef) {
+            exclude(group = "org.jogamp.jogl")
+            exclude(group = "org.jogamp.gluegen")
+        }
+    } else {
+        implementation(libs.kcef)
+    }
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

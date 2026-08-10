@@ -25,102 +25,119 @@ class DalvikHandler {
             // Deserialize DataBody
             val dataBody = objectMapper.readValue(json, DataBody::class.java)
 
-            // Load extension
-            val loadedExtension = MExtensionServerLoader.loadExtensionFromBase64(dataBody.data)
+            val invocation =
+                MExtensionServerLoader.invokeWithExtension(dataBody.data, dataBody.extensionId) { loadedExtension ->
+                    val selectedSource = MihonInvoker.selectSource(loadedExtension.sources, dataBody)
+                    MihonInvoker.preparePreferences(dataBody, selectedSource)
 
-            // Get domain from source
-            val domain =
-                loadedExtension.sources.firstOrNull()?.let { source ->
-                    try {
-                        val baseUrl = source.javaClass.getMethod("getBaseUrl").invoke(source) as String
-                        java.net.URI(baseUrl).host
-                    } catch (e: Exception) {
-                        logger.error(e) { "Error getting domain from source" }
-                        null
-                    }
-                } ?: "localhost"
+                    // Get domain from source
+                    val domain =
+                        selectedSource.let { source ->
+                            try {
+                                val baseUrl = source.javaClass.getMethod("getBaseUrl").invoke(source) as String
+                                java.net.URI(baseUrl).host
+                            } catch (e: Exception) {
+                                logger.error(e) { "Error getting domain from source" }
+                                null
+                            }
+                        } ?: "localhost"
 
-            // Intercept Cookie header and save to global cookie jar
-            val cookies =
-                (session.headers["cookie"] ?: session.headers["Cookie"])
-                    ?.let { cookieHeader ->
-                        cookieHeader
-                            .split(";")
-                            .map { cookieStr ->
-                                val trimmed = cookieStr.trim()
-                                val parts = trimmed.split("=", limit = 2)
-                                val name = parts[0].trim()
-                                val value = parts[1].trim()
-                                Cookie
-                                    .Builder()
-                                    .name(name)
-                                    .value(value)
-                                    .domain(domain.removePrefix("."))
-                                    .path("/")
-                                    .build()
-                            }.distinctBy { it.name }
-                    }?.toList()
-            val network =
-                loadedExtension.sources.firstOrNull()?.let { source ->
-                    when (source) {
-                        is HttpSource -> source.network
-                        is AnimeHttpSource -> source.network
-                        else -> null
+                    // Intercept Cookie header and save to global cookie jar
+                    val cookies =
+                        (session.headers["cookie"] ?: session.headers["Cookie"])
+                            ?.let { cookieHeader ->
+                                cookieHeader
+                                    .split(";")
+                                    .map { cookieStr ->
+                                        val trimmed = cookieStr.trim()
+                                        val parts = trimmed.split("=", limit = 2)
+                                        val name = parts[0].trim()
+                                        val value = parts[1].trim()
+                                        Cookie
+                                            .Builder()
+                                            .name(name)
+                                            .value(value)
+                                            .domain(domain.removePrefix("."))
+                                            .path("/")
+                                            .build()
+                                    }.distinctBy { it.name }
+                            }?.toList()
+                    val network =
+                        selectedSource.let { source ->
+                            when (source) {
+                                is HttpSource -> source.network
+                                is AnimeHttpSource -> source.network
+                                else -> null
+                            }
+                        }
+                    if (cookies != null) {
+                        network?.cookieJar?.addAll(
+                            HttpUrl
+                                .Builder()
+                                .scheme("http")
+                                .host(domain.removePrefix("."))
+                                .build(),
+                            cookies,
+                        )
                     }
+                    val ua = (session.headers["user-agent"] ?: session.headers["User-Agent"])
+                    if (ua != null) {
+                        network?.setUA(ua)
+                    }
+
+                    MihonInvoker.invokeMethod(loadedExtension, dataBody)
                 }
-            if (cookies != null) {
-                network?.cookieJar?.addAll(
-                    HttpUrl
-                        .Builder()
-                        .scheme("http")
-                        .host(domain.removePrefix("."))
-                        .build(),
-                    cookies,
-                )
-            }
-            val ua = (session.headers["user-agent"] ?: session.headers["User-Agent"])
-            if (ua != null) {
-                network?.setUA(ua)
-            }
-
-            // Invoke method
-            val result = MihonInvoker.invokeMethod(loadedExtension, dataBody)
 
             // Serialize response
-            val responseJson = objectMapper.writeValueAsString(result)
+            val responseJson = objectMapper.writeValueAsString(invocation.result)
 
-            NanoHTTPD.newFixedLengthResponse(
-                NanoHTTPD.Response.Status.OK,
-                "application/json",
-                responseJson,
-            )
-        } catch (e: Exception) {
-            logger.error(e) { "Error handling request" }
-            val status =
-                when (e) {
-                    is eu.kanade.tachiyomi.network.HttpException -> {
-                        when (e.code) {
-                            400 -> NanoHTTPD.Response.Status.BAD_REQUEST
-                            401 -> NanoHTTPD.Response.Status.UNAUTHORIZED
-                            403 -> NanoHTTPD.Response.Status.FORBIDDEN
-                            404 -> NanoHTTPD.Response.Status.NOT_FOUND
-                            429 -> NanoHTTPD.Response.Status.INTERNAL_ERROR
-                            500 -> NanoHTTPD.Response.Status.INTERNAL_ERROR
-                            else -> NanoHTTPD.Response.Status.INTERNAL_ERROR
-                        }
-                    }
-                    else -> NanoHTTPD.Response.Status.INTERNAL_ERROR
+            NanoHTTPD
+                .newFixedLengthResponse(
+                    NanoHTTPD.Response.Status.OK,
+                    "application/json",
+                    responseJson,
+                ).apply {
+                    addHeader("X-Mangatan-Extension-Id", invocation.extensionId)
                 }
-            val errorResponse =
-                mapOf(
-                    "error" to (e.message ?: "Unknown error"),
-                    "code" to (if (e is eu.kanade.tachiyomi.network.HttpException) e.code else 500),
-                )
-            val errorJson = objectMapper.writeValueAsString(errorResponse)
-            NanoHTTPD.newFixedLengthResponse(
-                status,
-                "application/json",
-                errorJson,
-            )
+        } catch (e: LinkageError) {
+            errorResponse(e)
+        } catch (e: Exception) {
+            errorResponse(e)
         }
+
+    private fun errorResponse(error: Throwable): NanoHTTPD.Response {
+        logger.error(error) { "Error handling request" }
+        val status =
+            when (error) {
+                is MExtensionServerLoader.ExtensionNotLoadedException -> NanoHTTPD.Response.Status.CONFLICT
+                is eu.kanade.tachiyomi.network.HttpException -> {
+                    when (error.code) {
+                        400 -> NanoHTTPD.Response.Status.BAD_REQUEST
+                        401 -> NanoHTTPD.Response.Status.UNAUTHORIZED
+                        403 -> NanoHTTPD.Response.Status.FORBIDDEN
+                        404 -> NanoHTTPD.Response.Status.NOT_FOUND
+                        429 -> NanoHTTPD.Response.Status.INTERNAL_ERROR
+                        500 -> NanoHTTPD.Response.Status.INTERNAL_ERROR
+                        else -> NanoHTTPD.Response.Status.INTERNAL_ERROR
+                    }
+                }
+                else -> NanoHTTPD.Response.Status.INTERNAL_ERROR
+            }
+        val errorResponse =
+            mapOf(
+                "error" to (error.message ?: error.javaClass.simpleName),
+                "code" to
+                    when (error) {
+                        is MExtensionServerLoader.ExtensionNotLoadedException -> 409
+                        is eu.kanade.tachiyomi.network.HttpException -> error.code
+                        else -> 500
+                    },
+            )
+        val errorJson = objectMapper.writeValueAsString(errorResponse)
+        return NanoHTTPD.newFixedLengthResponse(
+            status,
+            "application/json",
+            errorJson,
+        )
+    }
 }

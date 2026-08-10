@@ -7,14 +7,14 @@ package android.widget;
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-public class EditText {
-    public EditText(android.content.Context context) { throw new RuntimeException("Stub!"); }
+public class EditText extends TextView {
+    public EditText(android.content.Context context) { super(context); }
 
-    public EditText(android.content.Context context, android.util.AttributeSet attrs) { throw new RuntimeException("Stub!"); }
+    public EditText(android.content.Context context, android.util.AttributeSet attrs) { super(context, attrs); }
 
-    public EditText(android.content.Context context, android.util.AttributeSet attrs, int defStyleAttr) { throw new RuntimeException("Stub!"); }
+    public EditText(android.content.Context context, android.util.AttributeSet attrs, int defStyleAttr) { super(context, attrs, defStyleAttr); }
 
-    public EditText(android.content.Context context, android.util.AttributeSet attrs, int defStyleAttr, int defStyleRes) { throw new RuntimeException("Stub!"); }
+    public EditText(android.content.Context context, android.util.AttributeSet attrs, int defStyleAttr, int defStyleRes) { super(context, attrs, defStyleAttr, defStyleRes); }
 
     public boolean getFreezesText() { throw new RuntimeException("Stub!"); }
 

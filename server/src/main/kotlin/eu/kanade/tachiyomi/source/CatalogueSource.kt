@@ -2,7 +2,13 @@ package eu.kanade.tachiyomi.source
 
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SChapter
+import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.util.lang.awaitSingle
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import rx.Observable
 
 interface CatalogueSource : Source {
@@ -14,7 +20,7 @@ interface CatalogueSource : Source {
     /**
      * Whether the source has support for latest updates.
      */
-    val supportsLatest: Boolean
+    override val supportsLatest: Boolean
 
     /**
      * Get a page with a list of manga.
@@ -23,7 +29,7 @@ interface CatalogueSource : Source {
      * @param page the page number to retrieve.
      */
     @Suppress("DEPRECATION")
-    suspend fun getPopularManga(page: Int): MangasPage = fetchPopularManga(page).awaitSingle()
+    override suspend fun getPopularManga(page: Int): MangasPage = fetchPopularManga(page).awaitSingle()
 
     /**
      * Get a page with a list of manga.
@@ -34,7 +40,7 @@ interface CatalogueSource : Source {
      * @param filters the list of filters to apply.
      */
     @Suppress("DEPRECATION")
-    suspend fun getSearchManga(
+    override suspend fun getSearchManga(
         page: Int,
         query: String,
         filters: FilterList,
@@ -47,12 +53,36 @@ interface CatalogueSource : Source {
      * @param page the page number to retrieve.
      */
     @Suppress("DEPRECATION")
-    suspend fun getLatestUpdates(page: Int): MangasPage = fetchLatestUpdates(page).awaitSingle()
+    override suspend fun getLatestUpdates(page: Int): MangasPage = fetchLatestUpdates(page).awaitSingle()
+
+    /**
+     * Fetch updated manga details, chapters, or both.
+     *
+     * @since tachiyomix 1.6
+     */
+    @Suppress("DEPRECATION")
+    override suspend fun getMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate =
+        supervisorScope {
+            val updatedManga = if (fetchDetails) async { fetchMangaDetails(manga).awaitSingle() } else null
+            val updatedChapters = if (fetchChapters) async { fetchChapterList(manga).awaitSingle() } else null
+            SMangaUpdate(
+                updatedManga?.await() ?: manga,
+                updatedChapters?.await() ?: chapters,
+            )
+        }
+
+    @Suppress("DEPRECATION")
+    override suspend fun getPageList(chapter: SChapter): List<Page> = fetchPageList(chapter).awaitSingle()
 
     /**
      * Returns the list of filters for the source.
      */
-    fun getFilterList(): FilterList
+    override fun getFilterList(): FilterList = FilterList()
 
     @Deprecated(
         "Use the non-RxJava API instead",

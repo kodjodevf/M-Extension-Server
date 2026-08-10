@@ -20,10 +20,15 @@ import xyz.nulldev.androidcompat.AndroidCompatInitializer
 import xyz.nulldev.ts.config.ConfigKodeinModule
 import java.net.CookieHandler
 import java.net.CookieManager
+import java.util.concurrent.CompletableFuture
 import javax.swing.SwingUtilities
 
 private val logger = KotlinLogging.logger {}
 private val androidCompat by lazy { AndroidCompat() }
+private val applicationInitLock = Any()
+
+@Volatile
+private var applicationInitialized = false
 
 @Suppress("BlockingMethodInNonBlockingContext")
 fun main(args: Array<String>) {
@@ -38,7 +43,6 @@ fun main(args: Array<String>) {
         System.setProperty("apple.laf.useScreenMenuBar", "true")
     }
 
-    CookieHandler.setDefault(CookieManager())
     initApplication(appDir)
 
     if (useUI) {
@@ -56,27 +60,47 @@ fun main(args: Array<String>) {
     }
 }
 
-private fun initApplication(appDir: String?) {
-    logger.info("Running MExtensionServer ${BuildConfig.VERSION} revision ${BuildConfig.REVISION}")
+internal fun initApplication(appDir: String?) {
+    synchronized(applicationInitLock) {
+        if (applicationInitialized) return
 
-    // Initialize the main Looper for the application thread.
-    // This is required for extensions that use Dispatchers.Main from coroutines,
-    // which attempts to resolve the Android main handler via Looper.getMainLooper().
-    // Without this, extensions that use `withContext(Dispatchers.Main)` will fail.
-    try {
-        Looper.prepareMainLooper()
-    } catch (e: IllegalStateException) {
-        // If main looper is already prepared, continue without error
-        logger.debug { "Main Looper already initialized: ${e.message}" }
+        logger.info("Running MExtensionServer ${BuildConfig.VERSION} revision ${BuildConfig.REVISION}")
+
+        // Set custom app directory if provided
+        appDir?.let { System.setProperty("ts.server.rootDir", it) }
+        CookieHandler.setDefault(CookieManager())
+
+        startMainLooper()
+
+        // Load config API
+        DI.global.addImport(ConfigKodeinModule().create())
+        // Load Android compatibility dependencies
+        AndroidCompatInitializer().init()
+        // start app
+        androidCompat.startApp(App())
+        applicationInitialized = true
     }
+}
 
-    // Set custom app directory if provided
-    appDir?.let { System.setProperty("ts.server.rootDir", it) }
+private fun startMainLooper() {
+    if (Looper.getMainLooper() != null) return
 
-    // Load config API
-    DI.global.addImport(ConfigKodeinModule().create())
-    // Load Android compatibility dependencies
-    AndroidCompatInitializer().init()
-    // start app
-    androidCompat.startApp(App())
+    val ready = CompletableFuture<Unit>()
+    Thread(
+        {
+            try {
+                Looper.prepareMainLooper()
+                ready.complete(Unit)
+                Looper.loop()
+            } catch (error: Throwable) {
+                ready.completeExceptionally(error)
+                logger.error(error) { "Android main looper stopped" }
+            }
+        },
+        "Android main looper",
+    ).apply {
+        isDaemon = true
+        start()
+    }
+    ready.join()
 }

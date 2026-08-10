@@ -197,7 +197,7 @@ COMMAND-LINE:
   Example: launcher.bat 8080 ./data
 
 MORE INFO:
-  https://github.com/kodjodevf/m-extension-server
+  https://github.com/1Selxo/M-Extension-Server
 
 "@
 Set-Content -Path "$bundleDir\README.txt" -Value $readmeContent -Encoding ASCII
@@ -231,7 +231,7 @@ if ($BuildInstaller) {
         $issLines = @(
             '#define MyAppName "MExtension Server"',
             '#define MyAppVersion "1.0.0"',
-            '#define MyAppPublisher "kodjodevf"',
+            '#define MyAppPublisher "1Selxo"',
             "#define SourceDir `"$bundleAbsPath`"",
             '',
             '[Setup]',

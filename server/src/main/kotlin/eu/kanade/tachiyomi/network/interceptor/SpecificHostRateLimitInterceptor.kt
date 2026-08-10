@@ -6,6 +6,8 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * An OkHttp interceptor that handles given url host's rate limiting.
@@ -28,6 +30,12 @@ fun OkHttpClient.Builder.rateLimitHost(
     period: Long = 1,
     unit: TimeUnit = TimeUnit.SECONDS,
 ) = addInterceptor(SpecificHostRateLimitInterceptor(httpUrl, permits, period, unit))
+
+fun OkHttpClient.Builder.rateLimitHost(
+    httpUrl: HttpUrl,
+    permits: Int,
+    period: Duration = 1.seconds,
+) = addInterceptor(SpecificHostRateLimitInterceptor(httpUrl, permits, period.inWholeMilliseconds, TimeUnit.MILLISECONDS))
 
 class SpecificHostRateLimitInterceptor(
     httpUrl: HttpUrl,

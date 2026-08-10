@@ -1,9 +1,13 @@
+@file:Suppress("EXTENSION_SHADOWED_BY_MEMBER")
+
 package eu.kanade.tachiyomi.source.online
 
 import eu.kanade.tachiyomi.source.model.Page
 import rx.Observable
 
-fun HttpSource.getImageUrl(page: Page): Observable<Page> {
+fun HttpSource.getImageUrl(page: Page): Observable<Page> = resolveImageUrl(page)
+
+private fun HttpSource.resolveImageUrl(page: Page): Observable<Page> {
     page.status = Page.LOAD_PAGE
     return fetchImageUrl(page)
         .doOnError { page.status = Page.ERROR }
@@ -22,4 +26,4 @@ fun HttpSource.fetchRemainingImageUrlsFromPageList(pages: List<Page>): Observabl
     Observable
         .from(pages)
         .filter { it.imageUrl.isNullOrEmpty() }
-        .concatMap { getImageUrl(it) }
+        .concatMap { resolveImageUrl(it) }

@@ -1,0 +1,147 @@
+name: Build iOS embedded runtime
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-ios-runtime.yml"
+      - "AndroidCompat/**"
+      - "server/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-ios-runtime.yml"
+      - "AndroidCompat/**"
+      - "server/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RUNTIME_RELEASE_TAG: ios-runtime-v7
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx2g
+
+jobs:
+  build:
+    name: Build verified iOS JAR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: "21"
+          distribution: temurin
+
+      - name: Generate Android compatibility JAR
+        run: ./AndroidCompat/getAndroid.sh
+
+      - name: Test and build iOS ShadowJar
+        run: |
+          ./gradlew \
+            :server:test \
+            :server:shadowJar \
+            -PiosRuntime=true \
+            --no-daemon \
+            --max-workers=2 \
+            --stacktrace
+
+      - name: Verify and package runtime
+        run: |
+          set -euo pipefail
+          mapfile -t built_jars < <(
+            find server/build -maxdepth 1 -type f \
+              -name 'MExtensionServer-*.jar' -print
+          )
+          test "${#built_jars[@]}" -eq 1
+          source_jar="${built_jars[0]}"
+          test "$(stat -c %s "$source_jar")" -gt 20000000
+          mkdir release
+          cp "$source_jar" release/MExtensionServer-ios.jar
+
+          jar tf release/MExtensionServer-ios.jar > release/entries.txt
+          grep -qx 'r_styles.ini' release/entries.txt
+          grep -qx 'r_values.ini' release/entries.txt
+          grep -q '^org/objectweb/asm/ClassReader.class$' release/entries.txt
+          javap -classpath release/MExtensionServer-ios.jar \
+            -constants org.objectweb.asm.Opcodes |
+            grep -q 'V27 = 71'
+          if grep -Eq \
+            '^(ch/qos/logback|org/cef|dev/datlag/kcef|org/jogamp|com/jogamp)/' \
+            release/entries.txt; then
+            echo "Desktop-only classes leaked into the iOS runtime." >&2
+            exit 1
+          fi
+
+          cat > release/SOURCE_MANIFEST.txt <<EOF
+          M-Extension-Server repository: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY
+          M-Extension-Server commit: $GITHUB_SHA
+          Build mode: -PiosRuntime=true
+          Build JDK: 21
+          EOF
+          (
+            cd release
+            sha256sum MExtensionServer-ios.jar > SHA256SUMS
+          )
+
+      - name: Upload verified runtime
+        uses: actions/upload-artifact@v5
+        with:
+          name: m-extension-server-ios
+          path: |
+            release/MExtensionServer-ios.jar
+            release/SHA256SUMS
+            release/SOURCE_MANIFEST.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require a new immutable runtime tag
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RUNTIME_RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RUNTIME_RELEASE_TAG already exists." >&2
+            echo "Bump RUNTIME_RELEASE_TAG before publishing a new runtime." >&2
+            exit 1
+          fi
+
+      - name: Publish pinned iOS runtime
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RUNTIME_RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: M-Extension-Server embedded iOS runtime v7
+          body: |
+            Headless ShadowJar for Mangatan's on-device iOS Mihon bridge.
+
+            The JAR excludes desktop Chromium/JCEF dependencies and includes a
+            bytecode toolchain compatible with the pinned OpenJDK iOS runtime.
+            Its default OkHttp client matches the current Mihon extension
+            contract, including MangaFire 1.6.27, and retries one transient
+            extension-image failure.
+
+            This runtime adds the NewPipe Extractor v0.26.3 YouTube resolver,
+            including the SABR workaround for separate audio and resolutions
+            above 360p.
+          files: |
+            release/MExtensionServer-ios.jar
+            release/SHA256SUMS
+            release/SOURCE_MANIFEST.txt
+          fail_on_unmatched_files: true
+          prerelease: true
+          make_latest: false
