@@ -9,7 +9,7 @@ import java.util.Base64
  * existing Mangayomi bridge already persists and sends back on later calls.
  */
 object BridgeMemo {
-    private const val MARKER = "|mangatan-memo|"
+    private const val MARKER = "|mangayomi-memo|"
 
     fun encode(
         url: String,

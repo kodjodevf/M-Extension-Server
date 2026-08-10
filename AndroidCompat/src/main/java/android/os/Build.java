@@ -30,7 +30,7 @@ public class Build {
     public static final String HARDWARE = null;
     public static final String HOST = null;
     public static final String ID = null;
-    public static final String MANUFACTURER = "Mangatan";
+    public static final String MANUFACTURER = "Mangayomi";
     public static final String MODEL = "Desktop";
     public static final String PRODUCT = null;
     /** @deprecated */

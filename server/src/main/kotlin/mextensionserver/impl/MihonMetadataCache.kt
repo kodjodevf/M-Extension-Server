@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
 /**
  * Retains TachiyomiX 1.6 memo metadata across the bridge's stateless RPCs.
  *
- * Mangatan's current protocol sends manga and chapter URLs back to the bridge,
+ * Mangayomi's current protocol sends manga and chapter URLs back to the bridge,
  * but not source-specific memo fields. Keeping those fields here lets sources
  * use metadata returned by catalogue and chapter-list calls as intended.
  */

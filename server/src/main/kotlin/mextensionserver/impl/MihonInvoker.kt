@@ -45,7 +45,7 @@ import uy.kohesive.injekt.api.get
 
 object MihonInvoker {
     private val logger = KotlinLogging.logger {}
-    private const val BRIDGE_CONTEXT_KEY = "__mangatan_bridge_context__"
+    private const val BRIDGE_CONTEXT_KEY = "__mangayomi_bridge_context__"
     private const val REPLACE_PRESENT_PREFERENCES = "replace-present"
     private const val KL_RAW_SOURCE_ID = "7433897302034602657"
     private val context: Application

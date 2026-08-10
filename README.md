@@ -2,24 +2,11 @@
 
 M-Extension-Server is a lightweight, headless service for running Mihon (Tachiyomi)/Aniyomi extensions (APKs). It dynamically loads extensions from Base64-encoded APKs, executes catalogue and content methods (manga/anime), and returns results via a small HTTP API.
 
-## Mangatan compatibility
-
-The `v1.0.4.1` release adds the bridge protocol used by Mangatan for
-factory-created sources and live extension preferences. A compatible server
-advertises `mangatanMihonBridge`, `sourceFactory`, `preferenceCallbacks`,
-`sourceUrls`, `imageProxy`, and `youtubeResolver` from `GET /capabilities`.
-
-`GET /youtube/resolve?url=<youtube-video-url>` resolves video metadata,
-playable streams, separate audio tracks, and subtitles with NewPipe Extractor.
-
-The manga bridge implements the TachiyomiX 1.6 source API, including combined
-manga updates, source memo metadata, and suspend image URL resolution. Legacy
-RxJava extensions continue to work through compatibility fallbacks.
 
 ## Desktop and iOS runtimes
 
 The normal `:server:shadowJar` task builds the desktop server and retains
-KCEF/JCEF plus its native desktop dependencies. Mangatan's on-device iOS
+KCEF/JCEF plus its native desktop dependencies. Mangayomi's on-device iOS
 bridge uses `-PiosRuntime=true`, which replaces the logging backend and
 excludes Chromium, JCEF, JOGL, and other desktop-only runtime classes.
 

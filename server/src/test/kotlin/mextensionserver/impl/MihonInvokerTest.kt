@@ -76,7 +76,7 @@ class MihonInvokerTest {
         val context =
             mutableListOf<Map<String, Any>>(
                 mapOf(
-                    "key" to "__mangatan_bridge_context__",
+                    "key" to "__mangayomi_bridge_context__",
                     "preferenceApplyMode" to "replace-present",
                 ),
             )

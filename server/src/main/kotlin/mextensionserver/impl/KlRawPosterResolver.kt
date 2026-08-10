@@ -17,7 +17,7 @@ internal object KlRawPosterResolver {
             "Accept",
             "application/json",
             "User-Agent",
-            "Mangatan-MExtensionServer/1.0",
+            "Mangayomi-MExtensionServer/1.0",
         )
 
     fun resolve(

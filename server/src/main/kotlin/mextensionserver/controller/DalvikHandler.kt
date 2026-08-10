@@ -97,7 +97,7 @@ class DalvikHandler {
                     "application/json",
                     responseJson,
                 ).apply {
-                    addHeader("X-Mangatan-Extension-Id", invocation.extensionId)
+                    addHeader("X-Mangayomi-Extension-Id", invocation.extensionId)
                 }
         } catch (e: LinkageError) {
             errorResponse(e)

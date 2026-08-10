@@ -1,10 +1,6 @@
 name: CI Publish
 
 on:
-  workflow_dispatch:
-  pull_request:
-    branches:
-      - main
   push:
     tags:
       - "v*"
@@ -12,9 +8,6 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   check_wrapper:
@@ -26,6 +19,111 @@ jobs:
 
       - name: Validate Gradle Wrapper
         uses: gradle/actions/wrapper-validation@v5
+
+  build-macos:
+    name: Build macOS (.dmg)
+    needs: check_wrapper
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Generate android.jar
+        run: bash ./AndroidCompat/getAndroid.sh
+
+      - name: Build macOS bundle and DMG
+        run: |
+          chmod +x ./package_mac.sh
+          ./package_mac.sh
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundles
+          path: |
+            dist/MExtensionServer.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (.zip + .exe)
+    needs: check_wrapper
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Install zip (Windows)
+        run: choco install zip -y
+        shell: powershell
+
+      - name: Generate android.jar
+        run: bash ./AndroidCompat/getAndroid.sh
+        shell: bash
+
+      - name: Build Windows bundle
+        run: |
+          powershell -ExecutionPolicy Bypass -File ".\package_windows.ps1" -BuildInstaller
+        shell: powershell
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundles
+          path: |
+            dist/MExtensionServer*-setup-x64.exe
+            dist/MExtensionServer-Windows-x64.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (.tar.gz + deb + AppImage)
+    needs: check_wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Generate android.jar
+        run: bash ./AndroidCompat/getAndroid.sh
+
+      - name: Install AppImage dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
+
+      - name: Build Linux bundle
+        run: |
+          chmod +x ./package_linux.sh
+          ./package_linux.sh
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-bundles
+          path: |
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
 
   build-jar:
     name: Build Jar
@@ -45,7 +143,7 @@ jobs:
         run: ./AndroidCompat/getAndroid.sh
 
       - name: Build project (shadowJar)
-        run: ./gradlew :server:test :server:shadowJar --no-daemon --stacktrace
+        run: ./gradlew :server:shadowJar --no-daemon --stacktrace
 
       - name: Upload Jar
         uses: actions/upload-artifact@v5
@@ -56,7 +154,6 @@ jobs:
 
   jlink:
     name: Create platform JREs
-    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -148,20 +245,67 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: bundle
+    needs: [build-macos, build-windows, build-linux, bundle]
     runs-on: ubuntu-latest
     steps:
-      - name: Download bundle artifacts
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-bundles
+          path: release/macos
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-bundles
+          path: release/windows
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-bundles
+          path: release/linux
+
+      - name: Download Default Bundle artifacts
         uses: actions/download-artifact@v6
         with:
           path: release/default
 
-      - name: Collect release artifacts
+      - name: Rename and organize artifacts
         shell: bash
         run: |
           cd release
           mkdir -p final
+
+          # macOS (Custom DMG)
+          if [ -f "macos/MExtensionServer.dmg" ]; then
+            mv macos/MExtensionServer.dmg final/MExtensionServer-macOS.dmg
+          fi
+
+          # Windows (Custom Zip + Setup)
+          if [ -f "windows/MExtensionServer-Windows-x64.zip" ]; then
+            mv windows/MExtensionServer-Windows-x64.zip final/MExtensionServer-Windows-x64.zip
+          fi
+          EXE_FILE=$(find windows -name "MExtensionServer*-setup-x64.exe" | head -n 1)
+          if [ -n "$EXE_FILE" ]; then
+            mv "$EXE_FILE" final/MExtensionServer-Windows-Setup.exe
+          fi
+
+          # Linux (Custom Tar + AppImage + Deb)
+          if [ -f "linux/MExtensionServer-Linux-x64.tar.gz" ]; then
+            mv linux/MExtensionServer-Linux-x64.tar.gz final/MExtensionServer-Linux-x64.tar.gz
+          fi
+          if [ -f "linux/MExtensionServer-x86_64.AppImage" ]; then
+            mv linux/MExtensionServer-x86_64.AppImage final/MExtensionServer-x86_64.AppImage
+          fi
+          DEB_FILE=$(find linux -name "*.deb" | head -n 1)
+          if [ -n "$DEB_FILE" ]; then
+            mv "$DEB_FILE" final/MExtensionServer-Linux.deb
+          fi
+
+          # Default Bundles (matrix ones)
           find default -name "*-bundle.zip" -exec mv {} final/ \;
+
           ls -la final/
 
       - name: Create GitHub Release

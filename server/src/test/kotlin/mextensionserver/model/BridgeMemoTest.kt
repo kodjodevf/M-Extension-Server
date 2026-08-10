@@ -25,7 +25,7 @@ class BridgeMemoTest {
     @Test
     fun `leaves ordinary and malformed URLs unchanged`() {
         val ordinary = "https://example.com/manga/1"
-        val malformed = "/manga/1|mangatan-memo|not-base64"
+        val malformed = "/manga/1|mangayomi-memo|not-base64"
 
         assertEquals(ordinary, BridgeMemo.decode(ordinary).url)
         assertTrue(BridgeMemo.decode(ordinary).memo.isEmpty())

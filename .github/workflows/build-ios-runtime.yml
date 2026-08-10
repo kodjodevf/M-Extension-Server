@@ -127,7 +127,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: M-Extension-Server embedded iOS runtime v7
           body: |
-            Headless ShadowJar for Mangatan's on-device iOS Mihon bridge.
+            Headless ShadowJar for Mangayomi's on-device iOS Mihon bridge.
 
             The JAR excludes desktop Chromium/JCEF dependencies and includes a
             bytecode toolchain compatible with the pinned OpenJDK iOS runtime.
