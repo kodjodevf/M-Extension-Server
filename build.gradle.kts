@@ -28,7 +28,9 @@ allprojects {
 }
 
 val projects = listOf(
-    project(":server")
+    project(":AndroidCompat"),
+    project(":AndroidCompat:Config"),
+    project(":server"),
 )
 
 configure(projects) {
