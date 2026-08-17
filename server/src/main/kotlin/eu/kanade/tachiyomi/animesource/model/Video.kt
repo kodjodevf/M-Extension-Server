@@ -10,6 +10,21 @@ data class Track(
     val lang: String,
 )
 
+enum class ChapterType {
+    Opening,
+    Ending,
+    Recap,
+    MixedOp,
+    Other,
+}
+
+data class TimeStamp(
+    val start: Double,
+    val end: Double,
+    val name: String,
+    val type: ChapterType = ChapterType.Other,
+)
+
 open class Video(
     val url: String = "",
     val quality: String = "",
@@ -18,6 +33,7 @@ open class Video(
     // "url", "language-label-2", "url2", "language-label-2"
     val subtitleTracks: List<Track> = emptyList(),
     val audioTracks: List<Track> = emptyList(),
+    val timestamps: List<TimeStamp> = emptyList(),
 ) : ProgressListener {
     @Suppress("UNUSED_PARAMETER")
     constructor(
@@ -27,6 +43,15 @@ open class Video(
         uri: Uri? = null,
         headers: Headers? = null,
     ) : this(url, quality, videoUrl, headers)
+
+    constructor(
+        url: String,
+        quality: String,
+        videoUrl: String?,
+        headers: Headers? = null,
+        subtitleTracks: List<Track> = emptyList(),
+        audioTracks: List<Track> = emptyList(),
+    ) : this(url, quality, videoUrl, headers, subtitleTracks, audioTracks, emptyList())
 
     @Transient
     @Volatile
