@@ -2,8 +2,8 @@ name: Build iOS embedded runtime
 
 on:
   pull_request:
-    branches:
-      - main
+    # branches:
+    #   - main
     paths:
       - ".github/workflows/build-ios-runtime.yml"
       - "AndroidCompat/**"
