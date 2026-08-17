@@ -2,17 +2,6 @@ name: Build iOS embedded runtime
 
 on:
   pull_request:
-    # branches:
-    #   - main
-    paths:
-      - ".github/workflows/build-ios-runtime.yml"
-      - "AndroidCompat/**"
-      - "server/**"
-      - "gradle/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-  push:
     branches:
       - main
     paths:
@@ -23,7 +12,18 @@ on:
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
-  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - ".github/workflows/build-ios-runtime.yml"
+  #     - "AndroidCompat/**"
+  #     - "server/**"
+  #     - "gradle/**"
+  #     - "build.gradle.kts"
+  #     - "settings.gradle.kts"
+  #     - "gradle.properties"
+  # workflow_dispatch:
 
 permissions:
   contents: write
