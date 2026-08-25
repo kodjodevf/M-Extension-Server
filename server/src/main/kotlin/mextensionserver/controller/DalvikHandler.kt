@@ -1,5 +1,6 @@
 package mextensionserver.controller
 
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.source.online.HttpSource
@@ -13,7 +14,10 @@ import okhttp3.HttpUrl
 
 class DalvikHandler {
     private val logger = KotlinLogging.logger {}
-    private val objectMapper = jacksonObjectMapper()
+    private val objectMapper =
+        jacksonObjectMapper().apply {
+            configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        }
 
     fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response =
         try {

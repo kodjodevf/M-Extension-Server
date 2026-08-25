@@ -116,11 +116,40 @@ object MihonInvoker {
         if (loadedSources.isEmpty()) {
             throw IllegalArgumentException("No sources found in extension")
         }
+        if (loadedSources.size == 1) {
+            return loadedSources.first()
+        }
+
+        // 1. Try matching by requested sourceId if provided
         val requestedSourceId =
-            bridgeContext(data)["sourceId"]?.toString()
-                ?: return loadedSources.first()
-        return loadedSources.firstOrNull { sourceId(it) == requestedSourceId }
-            ?: throw IllegalArgumentException("Source $requestedSourceId was not found in extension")
+            data.sourceId
+                ?: bridgeContext(data)["sourceId"]?.toString()
+
+        if (!requestedSourceId.isNullOrBlank()) {
+            val match =
+                loadedSources.firstOrNull {
+                    val sId = sourceId(it)
+                    sId == requestedSourceId ||
+                        "mihon-$sId".hashCode().toString() == requestedSourceId ||
+                        sId.hashCode().toString() == requestedSourceId
+                }
+            if (match != null) return match
+        }
+
+        // 2. Try matching by language if provided (e.g. "fr", "en", "es", "all")
+        val requestedLang =
+            data.lang
+                ?: bridgeContext(data)["lang"]?.toString()
+
+        if (!requestedLang.isNullOrBlank()) {
+            val langMatch =
+                loadedSources.firstOrNull {
+                    sourceLanguage(it)?.equals(requestedLang, ignoreCase = true) == true
+                }
+            if (langMatch != null) return langMatch
+        }
+
+        return loadedSources.first()
     }
 
     private fun sourceId(source: Any): String =
