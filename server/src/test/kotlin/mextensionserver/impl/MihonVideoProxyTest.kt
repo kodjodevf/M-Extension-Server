@@ -1,5 +1,6 @@
 package mextensionserver.impl
 
+import com.sun.net.httpserver.HttpServer
 import okhttp3.Headers
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -10,6 +11,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.BufferedSource
 import okio.buffer
 import okio.source
+import java.net.InetSocketAddress
 import java.net.URI
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -118,6 +120,38 @@ class MihonVideoProxyTest {
         assertEquals("bytes 4-7/8", response.responseHeaders["Content-Range"])
         assertEquals(bytes.size.toLong(), response.contentLength)
         assertContentEquals(bytes, response.stream.use { it.readBytes() })
+    }
+
+    @Test
+    fun `requests identity encoding from extension loopback servers`() {
+        var seenEncoding: String? = null
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/playlist.m3u8") { exchange ->
+            seenEncoding = exchange.requestHeaders.getFirst("Accept-Encoding")
+            val body = "#EXTM3U\n#EXTINF:6.0,\nsegment.ts".encodeToByteArray()
+            exchange.responseHeaders.add("Content-Type", "application/vnd.apple.mpegurl")
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            MihonVideoProxy.configure(39642)
+            val proxyUrl =
+                assertNotNull(
+                    MihonVideoProxy.register(
+                        OkHttpClient(),
+                        "http://127.0.0.1:${server.address.port}/playlist.m3u8",
+                    ),
+                )
+
+            assertNotNull(MihonVideoProxy.fetch(proxyUrl.token())).stream.use {
+                it.readBytes()
+            }
+
+            assertEquals("identity", seenEncoding)
+        } finally {
+            server.stop(0)
+        }
     }
 
     @Test

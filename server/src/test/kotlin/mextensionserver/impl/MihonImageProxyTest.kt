@@ -47,6 +47,26 @@ class MihonImageProxyTest {
     }
 
     @Test
+    fun `fetches ordinary posters through the extension client`() {
+        val source = TestHttpSource()
+        MihonImageProxy.configure(39641)
+
+        val proxyUrl =
+            requireNotNull(
+                MihonImageProxy.registerPoster(
+                    source = source,
+                    title = "Poster title",
+                    url = "https://example.test/poster.jpg",
+                ),
+            )
+        val image = requireNotNull(MihonImageProxy.fetch(URI(proxyUrl).path.substringAfterLast('/')))
+
+        assertEquals(listOf("https://example.test/poster.jpg"), source.requestedUrls)
+        assertEquals("image/jpeg", image.contentType)
+        assertContentEquals(source.imageBytes, image.bytes)
+    }
+
+    @Test
     fun `resolves missing image urls through the extension`() {
         val source = TestHttpSource()
         val page = Page(0, url = "/reader-page")

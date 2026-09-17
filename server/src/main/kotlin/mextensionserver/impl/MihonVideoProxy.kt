@@ -146,6 +146,14 @@ internal object MihonVideoProxy {
                 .url(entry.url)
                 .headers(entry.headers)
                 .apply {
+                    // Extension-owned loopback M3U8 servers often forward the
+                    // player's Accept-Encoding header to their upstream CDN.
+                    // Supplying gzip explicitly disables OkHttp's transparent
+                    // decompression there, so compressed playlists and media
+                    // can be parsed as if they were raw HLS bytes.
+                    if (entry.url.isLoopback()) {
+                        header("Accept-Encoding", "identity")
+                    }
                     if (!range.isNullOrBlank()) {
                         header("Range", range)
                     }
@@ -176,6 +184,19 @@ internal object MihonVideoProxy {
                     contentType = "application/vnd.apple.mpegurl",
                     stream = ByteArrayInputStream(rewritten),
                     contentLength = rewritten.size.toLong(),
+                    responseHeaders = responseHeaders,
+                )
+            }
+
+            if (response.isSuccessful && entry.url.isLoopback() && contentType.contains("mp2t", ignoreCase = true)) {
+                val bytes = body.bytes()
+                val repaired = MpegTsSanitizer.repair(bytes)
+                response.close()
+                return VideoData(
+                    statusCode = response.code,
+                    contentType = contentType,
+                    stream = ByteArrayInputStream(repaired),
+                    contentLength = repaired.size.toLong(),
                     responseHeaders = responseHeaders,
                 )
             }

@@ -106,7 +106,7 @@ internal object MihonImageProxy {
         source: HttpSource,
         title: String,
         url: String,
-        resolver: (OkHttpClient, String) -> String? = KlRawPosterResolver::resolve,
+        resolver: (OkHttpClient, String) -> String? = { _, _ -> null },
     ): String? {
         val currentPort = port
         if (currentPort <= 0) return null

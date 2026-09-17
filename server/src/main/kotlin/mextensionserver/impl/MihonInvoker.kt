@@ -392,12 +392,23 @@ object MihonInvoker {
         manga: SManga,
     ): JManga {
         val converted = manga.toJManga()
-        if (source !is HttpSource || source.id.toString() != KL_RAW_SOURCE_ID) return converted
+        if (source !is HttpSource) return converted
 
         val thumbnailUrl = converted.thumbnail_url?.takeIf(String::isNotBlank) ?: return converted
+        val fallbackResolver =
+            if (source.id.toString() == KL_RAW_SOURCE_ID) {
+                KlRawPosterResolver::resolve
+            } else {
+                { _: okhttp3.OkHttpClient, _: String -> null }
+            }
         return converted.copy(
             thumbnail_url =
-                MihonImageProxy.registerPoster(source, converted.title, thumbnailUrl)
+                MihonImageProxy.registerPoster(
+                    source,
+                    converted.title,
+                    thumbnailUrl,
+                    fallbackResolver,
+                )
                     ?: thumbnailUrl,
         )
     }
