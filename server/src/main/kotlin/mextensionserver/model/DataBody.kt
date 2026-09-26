@@ -16,6 +16,7 @@ data class DataBody(
     val episodeData: EpisodeData? = null,
     val preferences: MutableList<Map<String, Any>>? = null,
     val sourceId: String? = null,
+    val sourceBaseUrl: String? = null,
     val lang: String? = null,
 )
 

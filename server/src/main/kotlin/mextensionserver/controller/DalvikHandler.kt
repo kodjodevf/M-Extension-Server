@@ -95,7 +95,16 @@ class DalvikHandler {
                         network?.setCloudflareProxyUrl(cloudflareProxy)
                     }
 
-                    MihonInvoker.invokeMethod(loadedExtension, dataBody)
+                    val baseUrlHeader =
+                        (session.headers[SOURCE_BASE_URL_HEADER] ?: session.headers["Source-Base-Url"])
+                    val invocationBody =
+                        if (baseUrlHeader.isNullOrBlank() || !dataBody.sourceBaseUrl.isNullOrBlank()) {
+                            dataBody
+                        } else {
+                            dataBody.copy(sourceBaseUrl = baseUrlHeader)
+                        }
+
+                    MihonInvoker.invokeMethod(loadedExtension, invocationBody)
                 }
 
             // Serialize response
@@ -154,5 +163,8 @@ class DalvikHandler {
     companion object {
         /** Optional per-request FlareSolverr / Byparr URL, sent by the client. */
         const val CF_PROXY_HEADER = "cf-proxy-url"
+
+        /** Identifies which source of a multi-source extension the call is for. */
+        const val SOURCE_BASE_URL_HEADER = "source-base-url"
     }
 }
