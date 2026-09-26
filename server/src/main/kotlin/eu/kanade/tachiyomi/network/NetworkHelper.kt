@@ -29,8 +29,13 @@ class NetworkHelper(
                 .cookieJar(cookieJar)
                 .addInterceptor(UncaughtExceptionInterceptor())
                 .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
-                .addInterceptor(CloudflareInterceptor())
-                .connectTimeout(30, TimeUnit.SECONDS)
+                .addInterceptor(
+                    CloudflareInterceptor(
+                        ::cloudflareProxyUrlProvider,
+                        ::setUA,
+                        cookieJar::addAll,
+                    ),
+                ).connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .callTimeout(2, TimeUnit.MINUTES)
                 .cache(
@@ -53,4 +58,13 @@ class NetworkHelper(
     }
 
     fun defaultUserAgentProvider() = defaultUserAgent
+
+    private var cloudflareProxyUrl: String = ""
+
+    /** URL of a FlareSolverr- / Byparr-compatible proxy, or "" to disable. */
+    fun setCloudflareProxyUrl(url: String) {
+        cloudflareProxyUrl = url
+    }
+
+    fun cloudflareProxyUrlProvider() = cloudflareProxyUrl
 }
