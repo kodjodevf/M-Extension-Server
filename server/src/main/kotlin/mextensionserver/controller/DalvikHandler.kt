@@ -89,6 +89,12 @@ class DalvikHandler {
                         network?.setUA(ua)
                     }
 
+                    val cloudflareProxy =
+                        (session.headers[CF_PROXY_HEADER] ?: session.headers["Cf-Proxy-Url"])
+                    if (cloudflareProxy != null) {
+                        network?.setCloudflareProxyUrl(cloudflareProxy)
+                    }
+
                     MihonInvoker.invokeMethod(loadedExtension, dataBody)
                 }
 
@@ -143,5 +149,10 @@ class DalvikHandler {
             "application/json",
             errorJson,
         )
+    }
+
+    companion object {
+        /** Optional per-request FlareSolverr / Byparr URL, sent by the client. */
+        const val CF_PROXY_HEADER = "cf-proxy-url"
     }
 }
