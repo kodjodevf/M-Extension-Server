@@ -136,7 +136,23 @@ object MihonInvoker {
             if (match != null) return match
         }
 
-        // 2. Try matching by language if provided (e.g. "fr", "en", "es", "all")
+        // 2. Try matching by base URL. Clients that rewrite the source id —
+        // Mangayomi hashes it, and a Dart hash never equals a JVM one — cannot
+        // be matched above, and an extension whose sources share a language
+        // would otherwise always resolve to the same one.
+        val requestedBaseUrl =
+            data.sourceBaseUrl
+                ?: bridgeContext(data)["sourceBaseUrl"]?.toString()
+
+        if (!requestedBaseUrl.isNullOrBlank()) {
+            val urlMatch =
+                loadedSources.firstOrNull {
+                    sourceBaseUrl(it)?.trimEnd('/').equals(requestedBaseUrl.trimEnd('/'), ignoreCase = true)
+                }
+            if (urlMatch != null) return urlMatch
+        }
+
+        // 3. Try matching by language if provided (e.g. "fr", "en", "es", "all")
         val requestedLang =
             data.lang
                 ?: bridgeContext(data)["lang"]?.toString()
@@ -252,6 +268,13 @@ object MihonInvoker {
         when (source) {
             is Source -> source.name
             is eu.kanade.tachiyomi.animesource.AnimeSource -> source.name
+            else -> null
+        }
+
+    private fun sourceBaseUrl(source: Any): String? =
+        when (source) {
+            is HttpSource -> source.baseUrl
+            is AnimeHttpSource -> source.baseUrl
             else -> null
         }
 
