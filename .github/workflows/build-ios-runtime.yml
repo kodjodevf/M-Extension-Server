@@ -12,24 +12,24 @@ on:
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
-  # push:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - ".github/workflows/build-ios-runtime.yml"
-  #     - "AndroidCompat/**"
-  #     - "server/**"
-  #     - "gradle/**"
-  #     - "build.gradle.kts"
-  #     - "settings.gradle.kts"
-  #     - "gradle.properties"
-  # workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-ios-runtime.yml"
+      - "AndroidCompat/**"
+      - "server/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  RUNTIME_RELEASE_TAG: ios-runtime-v7
+  RUNTIME_RELEASE_TAG: ios-runtime-v8
   GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx2g
 
 jobs:
