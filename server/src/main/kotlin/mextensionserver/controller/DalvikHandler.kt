@@ -45,27 +45,8 @@ class DalvikHandler {
                                 null
                             }
                         } ?: "localhost"
+                    val cleanDomain = domain.removePrefix("www.").removePrefix(".")
 
-                    // Intercept Cookie header and save to global cookie jar
-                    val cookies =
-                        (session.headers["cookie"] ?: session.headers["Cookie"])
-                            ?.let { cookieHeader ->
-                                cookieHeader
-                                    .split(";")
-                                    .map { cookieStr ->
-                                        val trimmed = cookieStr.trim()
-                                        val parts = trimmed.split("=", limit = 2)
-                                        val name = parts[0].trim()
-                                        val value = parts[1].trim()
-                                        Cookie
-                                            .Builder()
-                                            .name(name)
-                                            .value(value)
-                                            .domain(domain.removePrefix("."))
-                                            .path("/")
-                                            .build()
-                                    }.distinctBy { it.name }
-                            }?.toList()
                     val network =
                         selectedSource.let { source ->
                             when (source) {
@@ -74,19 +55,55 @@ class DalvikHandler {
                                 else -> null
                             }
                         }
-                    if (cookies != null) {
-                        network?.cookieJar?.addAll(
-                            HttpUrl
-                                .Builder()
-                                .scheme("http")
-                                .host(domain.removePrefix("."))
-                                .build(),
-                            cookies,
-                        )
-                    }
+
                     val ua = (session.headers["user-agent"] ?: session.headers["User-Agent"])
                     if (ua != null) {
                         network?.setUA(ua)
+                    }
+
+                    // Intercept Cookie header and save to global cookie jar
+                    val cookies =
+                        (session.headers["cookie"] ?: session.headers["Cookie"])
+                            ?.let { cookieHeader ->
+                                cookieHeader
+                                    .split(";")
+                                    .mapNotNull { cookieStr ->
+                                        val trimmed = cookieStr.trim()
+                                        val parts = trimmed.split("=", limit = 2)
+                                        if (parts.size == 2) {
+                                            val name = parts[0].trim()
+                                            val value = parts[1].trim()
+                                            try {
+                                                Cookie
+                                                    .Builder()
+                                                    .name(name)
+                                                    .value(value)
+                                                    .domain(cleanDomain)
+                                                    .path("/")
+                                                    .build()
+                                            } catch (_: Exception) {
+                                                null
+                                            }
+                                        } else {
+                                            null
+                                        }
+                                    }.distinctBy { it.name }
+                            }?.toList()
+
+                    if (!cookies.isNullOrEmpty() && cleanDomain != "localhost") {
+                        val httpUrl =
+                            try {
+                                HttpUrl
+                                    .Builder()
+                                    .scheme("https")
+                                    .host(cleanDomain)
+                                    .build()
+                            } catch (_: Exception) {
+                                null
+                            }
+                        if (httpUrl != null) {
+                            network?.cookieJar?.addAll(httpUrl, cookies)
+                        }
                     }
 
                     val cloudflareProxy =
