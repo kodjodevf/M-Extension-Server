@@ -496,23 +496,74 @@ object MihonInvoker {
 
         return runBlocking {
             val pages = source.getPageList(chapterData.toSChapter(source))
+            val httpSource = source as? HttpSource
+
+            val overridesFetchImage =
+                if (httpSource != null) {
+                    try {
+                        val method =
+                            httpSource.javaClass.getMethod(
+                                "fetchImage",
+                                eu.kanade.tachiyomi.source.model.Page::class.java,
+                            )
+                        method.declaringClass != HttpSource::class.java
+                    } catch (_: Exception) {
+                        false
+                    }
+                } else {
+                    false
+                }
+            val isSpecialSource = httpSource != null && httpSource.id.toString() == KL_RAW_SOURCE_ID
+
             pages.map { page ->
-                JPage(
-                    index = page.index,
-                    url = page.url,
-                    imageUrl =
-                        if (source is HttpSource) {
-                            MihonImageProxy.register(source, page)
-                                ?: run {
-                                    if (page.imageUrl == null) {
-                                        page.imageUrl = source.getImageUrl(page)
-                                    }
-                                    source.imageRequest(page).url.toString()
-                                }
-                        } else {
-                            page.imageUrl ?: page.url
-                        },
-                )
+                if (httpSource != null) {
+                    val rawImageUrl = page.imageUrl
+                    val isStandardHttpUrl =
+                        rawImageUrl != null &&
+                            (
+                                rawImageUrl.startsWith("http://", ignoreCase = true) ||
+                                    rawImageUrl.startsWith("https://", ignoreCase = true)
+                            ) &&
+                            !rawImageUrl.contains("#")
+
+                    val useProxy =
+                        overridesFetchImage || isSpecialSource || !isStandardHttpUrl
+
+                    if (useProxy) {
+                        JPage(
+                            index = page.index,
+                            url = page.url,
+                            imageUrl =
+                                MihonImageProxy.register(source, page)
+                                    ?: run {
+                                        if (page.imageUrl == null) {
+                                            page.imageUrl = source.getImageUrl(page)
+                                        }
+                                        source.imageRequest(page).url.toString()
+                                    },
+                        )
+                    } else {
+                        val request = httpSource.imageRequest(page)
+                        val directUrl = request.url.toString()
+                        val reqHeaders = request.headers
+                        val headersMap =
+                            (0 until reqHeaders.size).associate {
+                                reqHeaders.name(it) to reqHeaders.value(it)
+                            }
+                        JPage(
+                            index = page.index,
+                            url = page.url,
+                            imageUrl = directUrl,
+                            headers = if (headersMap.isNotEmpty()) headersMap else null,
+                        )
+                    }
+                } else {
+                    JPage(
+                        index = page.index,
+                        url = page.url,
+                        imageUrl = page.imageUrl ?: page.url,
+                    )
+                }
             }
         }
     }

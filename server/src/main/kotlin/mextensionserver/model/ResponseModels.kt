@@ -78,6 +78,7 @@ data class JPage(
     val index: Int,
     val url: String,
     val imageUrl: String?,
+    val headers: Map<String, String>? = null,
 )
 
 data class JPreference(
