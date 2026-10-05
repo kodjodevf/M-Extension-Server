@@ -29,7 +29,7 @@ permissions:
   contents: write
 
 env:
-  RUNTIME_RELEASE_TAG: ios-runtime-v8
+  RUNTIME_RELEASE_TAG: ios-runtime-v9
   GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx2g
 
 jobs:
@@ -125,7 +125,7 @@ jobs:
         with:
           tag_name: ${{ env.RUNTIME_RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          name: M-Extension-Server embedded iOS runtime v7
+          name: M-Extension-Server embedded iOS runtime v9
           body: |
             Headless ShadowJar for Mangayomi's on-device iOS Mihon bridge.
 
