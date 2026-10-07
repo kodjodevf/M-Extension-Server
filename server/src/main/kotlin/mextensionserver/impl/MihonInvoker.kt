@@ -711,7 +711,15 @@ object MihonInvoker {
         }
 
         return runBlocking {
-            val videos = source.getVideoList(episodeData.toSEpisode())
+            // extensions-lib 16 splits video retrieval in two: list the hosters, then
+            // resolve each one. A legacy source answers with a single hoster that already
+            // carries its videos (Hoster.NO_HOSTER_LIST), so both shapes flatten the same
+            // way and the client keeps receiving one flat list.
+            val hosters = with(source) { source.getHosterList(episodeData.toSEpisode()).sortHosters() }
+            val videos =
+                hosters.flatMap { hoster ->
+                    hoster.videoList ?: runCatching { source.getVideoList(hoster) }.getOrDefault(emptyList())
+                }
             videos.map { video ->
                 val resolvedVideo =
                     if (video.videoUrl.isNullOrEmpty() || video.status == Video.LOAD_VIDEO) {
