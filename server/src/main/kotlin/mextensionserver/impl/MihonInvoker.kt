@@ -23,7 +23,13 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import mextensionserver.model.AnimeData
 import mextensionserver.model.AnimeResponse
 import mextensionserver.model.BridgeMemo
@@ -42,12 +48,17 @@ import mextensionserver.model.toJChapter
 import mextensionserver.model.toJManga
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeoutException
 
 object MihonInvoker {
     private val logger = KotlinLogging.logger {}
     private const val BRIDGE_CONTEXT_KEY = "__mangayomi_bridge_context__"
     private const val REPLACE_PRESENT_PREFERENCES = "replace-present"
     private const val KL_RAW_SOURCE_ID = "7433897302034602657"
+
+    // ponytail: one fixed budget for every hoster; make it a setting if a slow but
+    // working hoster (a FlareSolverr solve can take ~20 s) keeps getting cut off.
+    private const val HOSTER_TIMEOUT_MS = 30_000L
     private val context: Application
         get() = Injekt.get()
 
@@ -716,10 +727,30 @@ object MihonInvoker {
             // carries its videos (Hoster.NO_HOSTER_LIST), so both shapes flatten the same
             // way and the client keeps receiving one flat list.
             val hosters = with(source) { source.getHosterList(episodeData.toSEpisode()).sortHosters() }
-            val videos =
-                hosters.flatMap { hoster ->
-                    hoster.videoList ?: runCatching { source.getVideoList(hoster) }.getOrDefault(emptyList())
-                }
+            // Resolve hosters in parallel and stop waiting after HOSTER_TIMEOUT_MS: one
+            // hoster stuck behind Cloudflare must not hold back the ones that work.
+            // Extractors block in OkHttp, so a late one is abandoned rather than cancelled
+            // and finishes on its own thread.
+            val hosterScope = CoroutineScope(Dispatchers.IO)
+            val results =
+                hosters
+                    .map { hoster ->
+                        hoster.videoList?.let { CompletableDeferred(Result.success(it)) }
+                            ?: hosterScope.async { runCatching { source.getVideoList(hoster) } }
+                    }.map { deferred ->
+                        withTimeoutOrNull(HOSTER_TIMEOUT_MS) { deferred.await() }
+                            ?: Result.failure(TimeoutException("Hoster timed out after ${HOSTER_TIMEOUT_MS}ms"))
+                    }
+            hosterScope.cancel()
+            results.forEachIndexed { i, result ->
+                result.exceptionOrNull()?.let { logger.warn(it) { "Hoster ${hosters[i].hosterName} failed" } }
+            }
+            val videos = results.flatMap { it.getOrDefault(emptyList()) }
+            // An empty list makes the client wait for videos that never come, so
+            // report why when every hoster failed.
+            if (videos.isEmpty()) {
+                results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
+            }
             videos.map { video ->
                 val resolvedVideo =
                     if (video.videoUrl.isNullOrEmpty() || video.status == Video.LOAD_VIDEO) {
