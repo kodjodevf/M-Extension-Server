@@ -238,7 +238,10 @@ class MihonInvokerTest {
     }
 
     @Test
-    fun `returns direct imageUrl and headers for standard HttpSource`() {
+    fun `serves standard HttpSource pages through the extension client`() {
+        // A direct URL would skip the interceptors the source fixes its image
+        // requests in, so even a plain https page goes through the proxy.
+        MihonImageProxy.configure(39641)
         val jar = createTempFile(prefix = "mextensionserver-test-", suffix = ".jar").toFile()
         val packageInfo =
             PackageInfo().apply {
@@ -264,9 +267,9 @@ class MihonInvokerTest {
             ) as List<JPage>
 
         assertEquals(1, result.size)
-        assertEquals("https://cdn.example.test/ch1/01.jpg", result[0].imageUrl)
-        assertEquals("https://example.test/", result[0].headers?.get("Referer"))
+        assertTrue(result[0].imageUrl?.startsWith("http://127.0.0.1:39641/image/") == true)
         extension.close()
+        MihonImageProxy.clear()
     }
 
     private class DirectHttpSource : HttpSource() {

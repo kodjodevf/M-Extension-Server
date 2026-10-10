@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit
  */
 class CloudflareInterceptor(
     private val proxyUrl: () -> String,
-    private val setUserAgent: (String) -> Unit,
+    private val setUserAgent: (host: String, userAgent: String) -> Unit,
     private val storeCookies: (HttpUrl, List<Cookie>) -> Unit,
 ) : Interceptor {
     private val logger = KotlinLogging.logger {}
@@ -156,7 +156,7 @@ class CloudflareInterceptor(
 
         if (solution.userAgent.isEmpty()) return request
 
-        setUserAgent(solution.userAgent)
+        setUserAgent(request.url.host, solution.userAgent)
         return request
             .newBuilder()
             .header("User-Agent", solution.userAgent)
