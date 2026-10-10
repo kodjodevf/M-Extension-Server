@@ -13,8 +13,10 @@ import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import okhttp3.Cache
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import java.nio.file.Files
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class NetworkHelper(
@@ -28,11 +30,11 @@ class NetworkHelper(
                 .Builder()
                 .cookieJar(cookieJar)
                 .addInterceptor(UncaughtExceptionInterceptor())
-                .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
+                .addInterceptor(UserAgentInterceptor(::userAgentFor))
                 .addInterceptor(
                     CloudflareInterceptor(
                         ::cloudflareProxyUrlProvider,
-                        ::setUA,
+                        ::setSolvedUA,
                         cookieJar::addAll,
                     ),
                 ).connectTimeout(30, TimeUnit.SECONDS)
@@ -58,6 +60,20 @@ class NetworkHelper(
     }
 
     fun defaultUserAgentProvider() = defaultUserAgent
+
+    // A Cloudflare clearance cookie is only accepted with the user-agent that
+    // solved the challenge, while clients send their own with every call. A
+    // solved host keeps the solver's, or each request is challenged again.
+    private val solvedUserAgents = ConcurrentHashMap<String, String>()
+
+    fun setSolvedUA(
+        host: String,
+        ua: String,
+    ) {
+        solvedUserAgents[host] = ua
+    }
+
+    fun userAgentFor(url: HttpUrl) = solvedUserAgents[url.host] ?: defaultUserAgent
 
     private var cloudflareProxyUrl: String = ""
 
