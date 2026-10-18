@@ -4,6 +4,9 @@ import eu.kanade.tachiyomi.network.MemoryCookieJar
 import fi.iki.elonen.NanoHTTPD
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -118,6 +121,35 @@ class CloudflareInterceptorTest {
         } finally {
             plain.stop()
             solver.stop()
+        }
+    }
+
+    @Test
+    fun `does not make normal requests wait for each other`() {
+        // Each request only succeeds if the other one reaches the site while it is still open.
+        val bothArrived = CountDownLatch(2)
+        val site =
+            object : NanoHTTPD(0) {
+                override fun serve(session: IHTTPSession): Response {
+                    bothArrived.countDown()
+                    val together = bothArrived.await(3, TimeUnit.SECONDS)
+                    val status = if (together) Response.Status.OK else Response.Status.INTERNAL_ERROR
+                    return newFixedLengthResponse(status, "text/plain", "")
+                }
+            }.apply { start() }
+        val pool = Executors.newFixedThreadPool(2)
+
+        try {
+            val client = clientFor("http://localhost:1/v1")
+            val request = Request.Builder().url("http://localhost:${site.listeningPort}/").build()
+            val codes =
+                List(2) { pool.submit<Int> { client.newCall(request).execute().use { it.code } } }
+                    .map { it.get(10, TimeUnit.SECONDS) }
+
+            assertEquals(listOf(200, 200), codes)
+        } finally {
+            pool.shutdownNow()
+            site.stop()
         }
     }
 
