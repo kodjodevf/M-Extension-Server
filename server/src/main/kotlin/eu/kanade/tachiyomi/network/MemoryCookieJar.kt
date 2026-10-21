@@ -38,10 +38,9 @@ class MemoryCookieJar : CookieJar {
         url: HttpUrl,
         cookies: List<Cookie>,
     ) {
-        val cookiesToAdd = cookies.map { WrappedCookie.wrap(it) }
-
-        cache.removeAll(cookiesToAdd)
-        cache.addAll(cookiesToAdd)
+        // A response may set the same cookie twice (an expired "deleted" one, then the new
+        // value). Apply them in order so the last one wins, as browsers do.
+        cookies.forEach { addCookie(it) }
     }
 
     @Synchronized
