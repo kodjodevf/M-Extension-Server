@@ -571,7 +571,7 @@ class KcefWebViewProvider(
                 }
         } catch (error: Throwable) {
             initializationFailure = error
-            Log.w(TAG, "Desktop WebView (CEF) is unavailable; will use bridge or stub if needed", error)
+            Log.d(TAG, "Desktop WebView (CEF) is unavailable (${error.message ?: error.javaClass.simpleName}); using bridge/stub fallback")
             return
         }
         initHandler.init(this)
@@ -641,6 +641,7 @@ class KcefWebViewProvider(
         additionalHttpHeaders: Map<String, String>,
     ) {
         currentUrl = loadUrl
+        Log.d(TAG, "loadUrl: $loadUrl (bridgePort: $bridgePort)")
         browser?.close(true)
         browser?.dispose()
         browser = null
@@ -1159,6 +1160,34 @@ class KcefWebViewProvider(
                                     path?.let { append("; Path=$it") }
                                 }
                             cookieManager.setCookie(finalUrl, cookieStr)
+                        }
+                    }
+
+                    // Replay intercepted resources to the WebViewClient
+                    val resourcesArray = responseObj["resources"]?.jsonArray
+                    resourcesArray?.forEach { resElement ->
+                        val resUrl = resElement.jsonPrimitive.contentOrNull
+                        if (!resUrl.isNullOrEmpty()) {
+                            val webRequest =
+                                object : WebResourceRequest {
+                                    override fun getUrl(): Uri = Uri.parse(resUrl)
+                                    override fun isForMainFrame(): Boolean = false
+                                    override fun isRedirect(): Boolean = false
+                                    override fun hasGesture(): Boolean = false
+                                    override fun getMethod(): String = "GET"
+                                    override fun getRequestHeaders(): Map<String, String> = emptyMap()
+                                }
+                            try {
+                                viewClient.shouldInterceptRequest(view, webRequest)
+                            } catch (e: Exception) {
+                                Log.d(TAG, "viewClient.shouldInterceptRequest threw: $e")
+                            }
+                            try {
+                                @Suppress("DEPRECATION")
+                                viewClient.shouldInterceptRequest(view, resUrl)
+                            } catch (e: Exception) {
+                                Log.d(TAG, "viewClient.shouldInterceptRequest(String) threw: $e")
+                            }
                         }
                     }
 
