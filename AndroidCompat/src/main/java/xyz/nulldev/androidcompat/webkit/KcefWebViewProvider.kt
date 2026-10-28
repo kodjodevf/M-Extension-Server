@@ -56,7 +56,16 @@ import dev.datlag.kcef.KCEFBrowser
 import dev.datlag.kcef.KCEFClient
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.cef.CefSettings
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
@@ -86,7 +95,6 @@ import org.cef.network.CefResponse
 import org.kodein.di.DI
 import org.kodein.di.conf.global
 import org.kodein.di.instance
-import xyz.nulldev.androidcompat.io.AndroidFiles
 import java.io.BufferedWriter
 import java.io.File
 import java.io.IOException
@@ -110,6 +118,11 @@ class KcefWebViewProvider(
     private var kcefClient: KCEFClient? = null
     private var browser: KCEFBrowser? = null
     private var initializationFailure: Throwable? = null
+    private var currentUrl: String? = null
+    private var currentTitle: String = ""
+    private var isPaused: Boolean = false
+    private val viewDelegate = KcefViewDelegate()
+    private val scrollDelegate = KcefScrollDelegate()
 
     private val handler = Handler(view.webViewLooper)
 
@@ -117,6 +130,9 @@ class KcefWebViewProvider(
         const val TAG = "KcefWebViewProvider"
         const val QUERY_FN = "__\$_suwayomiQuery"
         const val QUERY_CANCEL_FN = "__\$_suwayomiQueryCancel"
+
+        @Volatile
+        var bridgePort: Int = 0
 
         private val initHandler: InitBrowserHandler by DI.global.instance<InitBrowserHandler>()
     }
@@ -216,6 +232,14 @@ class KcefWebViewProvider(
             url: String,
         ) {
             Log.d(TAG, "Navigate to $url")
+        }
+
+        override fun onTitleChange(
+            browser: CefBrowser,
+            title: String,
+        ) {
+            currentTitle = title
+            handler.post { chromeClient.onReceivedTitle(view, title) }
         }
 
         override fun onStatusMessage(
@@ -545,9 +569,9 @@ class KcefWebViewProvider(
                     config.jsCancelFunction = QUERY_CANCEL_FN
                     addMessageRouter(CefMessageRouter.create(config, MessageRouterHandler()))
                 }
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             initializationFailure = error
-            Log.w(TAG, "Desktop WebView is unavailable; failing this solve immediately")
+            Log.w(TAG, "Desktop WebView (CEF) is unavailable; will use bridge or stub if needed", error)
             return
         }
         initHandler.init(this)
@@ -556,41 +580,37 @@ class KcefWebViewProvider(
     private fun requireKcefClient(): KCEFClient =
         kcefClient ?: throw IllegalStateException("Desktop WebView is unavailable", initializationFailure)
 
-    // Deprecated - should never be called
-    override fun setHorizontalScrollbarOverlay(overlay: Boolean): Unit = throw RuntimeException("Stub!")
+    override fun setHorizontalScrollbarOverlay(overlay: Boolean) {}
 
-    // Deprecated - should never be called
-    override fun setVerticalScrollbarOverlay(overlay: Boolean): Unit = throw RuntimeException("Stub!")
+    override fun setVerticalScrollbarOverlay(overlay: Boolean) {}
 
-    // Deprecated - should never be called
-    override fun overlayHorizontalScrollbar(): Boolean = throw RuntimeException("Stub!")
+    override fun overlayHorizontalScrollbar(): Boolean = false
 
-    // Deprecated - should never be called
-    override fun overlayVerticalScrollbar(): Boolean = throw RuntimeException("Stub!")
+    override fun overlayVerticalScrollbar(): Boolean = false
 
-    override fun getVisibleTitleHeight(): Int = throw RuntimeException("Stub!")
+    override fun getVisibleTitleHeight(): Int = 0
 
-    override fun getCertificate(): SslCertificate = throw RuntimeException("Stub!")
+    override fun getCertificate(): SslCertificate? = null
 
-    override fun setCertificate(certificate: SslCertificate): Unit = throw RuntimeException("Stub!")
+    override fun setCertificate(certificate: SslCertificate) {}
 
     override fun savePassword(
         host: String,
         username: String,
         password: String,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
     override fun setHttpAuthUsernamePassword(
         host: String,
         realm: String,
         username: String,
         password: String,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
     override fun getHttpAuthUsernamePassword(
         host: String,
         realm: String,
-    ): Array<String> = throw RuntimeException("Stub!")
+    ): Array<String> = emptyArray()
 
     override fun destroy() {
         browser?.close(true)
@@ -600,40 +620,70 @@ class KcefWebViewProvider(
         kcefClient = null
     }
 
-    override fun setNetworkAvailable(networkUp: Boolean): Unit = throw RuntimeException("Stub!")
+    override fun setNetworkAvailable(networkUp: Boolean) {}
 
-    override fun saveState(outState: Bundle): WebBackForwardList = throw RuntimeException("Stub!")
+    override fun saveState(outState: Bundle): WebBackForwardList? = null
 
     override fun savePicture(
         b: Bundle,
         dest: File,
-    ): Boolean = throw RuntimeException("Stub!")
+    ): Boolean = false
 
     override fun restorePicture(
         b: Bundle,
         src: File,
-    ): Boolean = throw RuntimeException("Stub!")
+    ): Boolean = false
 
-    override fun restoreState(inState: Bundle): WebBackForwardList = throw RuntimeException("Stub!")
+    override fun restoreState(inState: Bundle): WebBackForwardList? = null
 
     override fun loadUrl(
         loadUrl: String,
         additionalHttpHeaders: Map<String, String>,
     ) {
+        currentUrl = loadUrl
         browser?.close(true)
         browser?.dispose()
+        browser = null
         chromeClient.onProgressChanged(view, 0)
         initialRequestData = InitialRequestData(additionalHttpHeaders = additionalHttpHeaders)
-        browser =
-            requireKcefClient()
-                .createBrowser(
+
+        val client = kcefClient
+        if (client != null) {
+            try {
+                browser =
+                    client
+                        .createBrowser(
+                            loadUrl,
+                            CefRendering.OFFSCREEN,
+                        ).apply {
+                            createImmediately()
+                        }
+                Log.d(TAG, "Page loaded at URL $loadUrl")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "CEF createBrowser failed: $e, falling back to bridge/stub")
+            }
+        }
+
+        // CEF is unavailable or failed to initialize
+        if (bridgePort > 0) {
+            val combinedHeaders = HashMap(additionalHttpHeaders)
+            if (settings.userAgentString.isNotEmpty()) {
+                combinedHeaders["User-Agent"] = settings.userAgentString
+            }
+            executeBridgeWebview(bridgePort, loadUrl, combinedHeaders)
+        } else {
+            Log.w(TAG, "Desktop WebView is unavailable and no bridge configured; failing gracefully for $loadUrl")
+            handler.post {
+                viewClient.onReceivedError(
+                    view,
+                    WebViewClient.ERROR_UNKNOWN,
+                    "Desktop WebView is unavailable",
                     loadUrl,
-                    CefRendering.OFFSCREEN,
-                ).apply {
-                    // NOTE: Without this, we don't seem to be receiving any events
-                    createImmediately()
-                }
-        Log.d(TAG, "Page loaded at URL $loadUrl")
+                )
+                viewClient.onPageFinished(view, loadUrl)
+            }
+        }
     }
 
     override fun loadUrl(url: String) {
@@ -644,20 +694,51 @@ class KcefWebViewProvider(
         url: String,
         postData: ByteArray,
     ) {
+        currentUrl = url
         browser?.close(true)
         browser?.dispose()
+        browser = null
         chromeClient.onProgressChanged(view, 0)
         initialRequestData = InitialRequestData(myPostData = postData)
-        browser =
-            requireKcefClient()
-                .createBrowser(
-                    url,
-                    CefRendering.OFFSCREEN,
-                ).apply {
-                    // NOTE: Without this, we don't seem to be receiving any events
-                    createImmediately()
+
+        val client = kcefClient
+        if (client != null) {
+            try {
+                browser =
+                    client
+                        .createBrowser(
+                            url,
+                            CefRendering.OFFSCREEN,
+                        ).apply {
+                            createImmediately()
+                        }
+                Log.d(TAG, "Page posted at URL $url")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "CEF createBrowser failed: $e, falling back to bridge/stub")
+            }
+        }
+
+        if (bridgePort > 0) {
+            val headers =
+                if (settings.userAgentString.isNotEmpty()) {
+                    mapOf("User-Agent" to settings.userAgentString)
+                } else {
+                    emptyMap()
                 }
-        Log.d(TAG, "Page posted at URL $url")
+            executeBridgeWebview(bridgePort, url, headers, postData = postData)
+        } else {
+            Log.w(TAG, "Desktop WebView is unavailable and no bridge configured; failing gracefully for $url")
+            handler.post {
+                viewClient.onReceivedError(
+                    view,
+                    WebViewClient.ERROR_UNKNOWN,
+                    "Desktop WebView is unavailable",
+                    url,
+                )
+                viewClient.onPageFinished(view, url)
+            }
+        }
     }
 
     override fun loadData(
@@ -675,161 +756,203 @@ class KcefWebViewProvider(
         encoding: String,
         historyUrl: String?,
     ) {
+        currentUrl = baseUrl ?: historyUrl
+        baseUrl?.let { urlHttpMapping[it.trimEnd('/')] = data }
         browser?.close(true)
         browser?.dispose()
+        browser = null
         chromeClient.onProgressChanged(view, 0)
 
-        browser =
-            (
-                baseUrl?.let { url ->
-                    urlHttpMapping.put(url.trimEnd('/'), data)
-                    requireKcefClient().createBrowser(
-                        url,
-                        CefRendering.OFFSCREEN,
-                    )
-                }
-                    ?: run {
-                        requireKcefClient().createBrowserWithHtml(
-                            data,
-                            KCEFBrowser.BLANK_URI,
-                            CefRendering.OFFSCREEN,
-                        )
+        val client = kcefClient
+        if (client != null) {
+            try {
+                browser =
+                    (
+                        baseUrl?.let { url ->
+                            client.createBrowser(
+                                url,
+                                CefRendering.OFFSCREEN,
+                            )
+                        }
+                            ?: run {
+                                client.createBrowserWithHtml(
+                                    data,
+                                    KCEFBrowser.BLANK_URI,
+                                    CefRendering.OFFSCREEN,
+                                )
+                            }
+                    ).apply {
+                        createImmediately()
                     }
-            ).apply {
-                // NOTE: Without this, we don't seem to be receiving any events
-                createImmediately()
+                Log.d(TAG, "Page loaded from data at base URL $baseUrl")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "CEF createBrowser failed: $e, falling back to stub")
             }
-        Log.d(TAG, "Page loaded from data at base URL $baseUrl")
+        }
+
+        handler.post {
+            chromeClient.onProgressChanged(view, 100)
+            viewClient.onPageFinished(view, baseUrl ?: "")
+        }
     }
 
     override fun evaluateJavaScript(
         script: String,
         resultCallback: ValueCallback<String>,
     ) {
-        browser!!.evaluateJavaScript(
-            script.removePrefix("javascript:"),
-            {
-                Log.v(TAG, "JS returned: $it")
-                it?.let { handler.post { resultCallback.onReceiveValue(it) } }
-            },
-        )
+        val b = browser
+        if (b != null) {
+            b.evaluateJavaScript(
+                script.removePrefix("javascript:"),
+                {
+                    Log.v(TAG, "JS returned: $it")
+                    handler.post { resultCallback.onReceiveValue(it) }
+                },
+            )
+        } else if (bridgePort > 0) {
+            Thread {
+                try {
+                    val jsResult = executeBridgeJavascript(bridgePort, currentUrl ?: "", script)
+                    handler.post { resultCallback.onReceiveValue(jsResult) }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Bridge JS evaluation failed", e)
+                    handler.post { resultCallback.onReceiveValue(null) }
+                }
+            }.start()
+        } else {
+            handler.post { resultCallback.onReceiveValue(null) }
+        }
     }
 
-    override fun saveWebArchive(filename: String): Unit = throw RuntimeException("Stub!")
+    override fun saveWebArchive(filename: String) {}
 
     override fun saveWebArchive(
         basename: String,
         autoname: Boolean,
         callback: ValueCallback<String>,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {
+        callback.onReceiveValue(null)
+    }
 
     override fun stopLoading() {
-        browser!!.stopLoad()
+        browser?.stopLoad()
     }
 
     override fun reload() {
-        browser!!.reload()
+        if (browser != null) {
+            browser?.reload()
+        } else {
+            currentUrl?.let { loadUrl(it) }
+        }
     }
 
-    override fun canGoBack(): Boolean = browser!!.canGoBack()
+    override fun canGoBack(): Boolean = browser?.canGoBack() ?: false
 
     override fun goBack() {
-        browser!!.goBack()
+        browser?.goBack()
     }
 
-    override fun canGoForward(): Boolean = browser!!.canGoForward()
+    override fun canGoForward(): Boolean = browser?.canGoForward() ?: false
 
     override fun goForward() {
-        browser!!.goForward()
+        browser?.goForward()
     }
 
-    override fun canGoBackOrForward(steps: Int): Boolean = throw RuntimeException("Stub!")
+    override fun canGoBackOrForward(steps: Int): Boolean = false
 
-    override fun goBackOrForward(steps: Int): Unit = throw RuntimeException("Stub!")
+    override fun goBackOrForward(steps: Int) {}
 
-    override fun isPrivateBrowsingEnabled(): Boolean = throw RuntimeException("Stub!")
+    override fun isPrivateBrowsingEnabled(): Boolean = false
 
-    override fun pageUp(top: Boolean): Boolean = throw RuntimeException("Stub!")
+    override fun pageUp(top: Boolean): Boolean = false
 
-    override fun pageDown(bottom: Boolean): Boolean = throw RuntimeException("Stub!")
+    override fun pageDown(bottom: Boolean): Boolean = false
 
     override fun insertVisualStateCallback(
         requestId: Long,
         callback: VisualStateCallback,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {
+        callback.onComplete(requestId)
+    }
 
-    override fun clearView(): Unit = throw RuntimeException("Stub!")
+    override fun clearView() {}
 
-    override fun capturePicture(): Picture = throw RuntimeException("Stub!")
+    override fun capturePicture(): Picture = Picture()
 
-    override fun createPrintDocumentAdapter(documentName: String): PrintDocumentAdapter = throw RuntimeException("Stub!")
+    override fun createPrintDocumentAdapter(documentName: String): PrintDocumentAdapter =
+        throw UnsupportedOperationException("PrintDocumentAdapter not supported")
 
-    override fun getScale(): Float = throw RuntimeException("Stub!")
+    override fun getScale(): Float = 1.0f
 
-    override fun setInitialScale(scaleInPercent: Int): Unit = throw RuntimeException("Stub!")
+    override fun setInitialScale(scaleInPercent: Int) {}
 
-    override fun invokeZoomPicker(): Unit = throw RuntimeException("Stub!")
+    override fun invokeZoomPicker() {}
 
-    override fun getHitTestResult(): HitTestResult = throw RuntimeException("Stub!")
+    override fun getHitTestResult(): HitTestResult = HitTestResult()
 
-    override fun requestFocusNodeHref(hrefMsg: Message): Unit = throw RuntimeException("Stub!")
+    override fun requestFocusNodeHref(hrefMsg: Message) {}
 
-    override fun requestImageRef(msg: Message): Unit = throw RuntimeException("Stub!")
+    override fun requestImageRef(msg: Message) {}
 
-    override fun getUrl(): String = browser!!.url
+    override fun getUrl(): String = browser?.url ?: currentUrl ?: ""
 
-    override fun getOriginalUrl(): String = browser!!.url
+    override fun getOriginalUrl(): String = browser?.url ?: currentUrl ?: ""
 
-    override fun getTitle(): String = throw RuntimeException("Stub!")
+    override fun getTitle(): String = currentTitle
 
-    override fun getFavicon(): Bitmap = throw RuntimeException("Stub!")
+    override fun getFavicon(): Bitmap? = null
 
-    override fun getTouchIconUrl(): String = throw RuntimeException("Stub!")
+    override fun getTouchIconUrl(): String? = null
 
-    override fun getProgress(): Int = throw RuntimeException("Stub!")
+    override fun getProgress(): Int = 100
 
-    override fun getContentHeight(): Int = throw RuntimeException("Stub!")
+    override fun getContentHeight(): Int = 0
 
-    override fun getContentWidth(): Int = throw RuntimeException("Stub!")
+    override fun getContentWidth(): Int = 0
 
-    override fun pauseTimers(): Unit = throw RuntimeException("Stub!")
+    override fun pauseTimers() {}
 
-    override fun resumeTimers(): Unit = throw RuntimeException("Stub!")
+    override fun resumeTimers() {}
 
-    override fun onPause(): Unit = throw RuntimeException("Stub!")
+    override fun onPause() {
+        isPaused = true
+    }
 
-    override fun onResume(): Unit = throw RuntimeException("Stub!")
+    override fun onResume() {
+        isPaused = false
+    }
 
-    override fun isPaused(): Boolean = throw RuntimeException("Stub!")
+    override fun isPaused(): Boolean = isPaused
 
-    override fun freeMemory(): Unit = throw RuntimeException("Stub!")
+    override fun freeMemory() {}
 
-    override fun clearCache(includeDiskFiles: Boolean): Unit = throw RuntimeException("Stub!")
+    override fun clearCache(includeDiskFiles: Boolean) {}
 
-    override fun clearFormData(): Unit = throw RuntimeException("Stub!")
+    override fun clearFormData() {}
 
-    override fun clearHistory(): Unit = throw RuntimeException("Stub!")
+    override fun clearHistory() {}
 
-    override fun clearSslPreferences(): Unit = throw RuntimeException("Stub!")
+    override fun clearSslPreferences() {}
 
-    override fun copyBackForwardList(): WebBackForwardList = throw RuntimeException("Stub!")
+    override fun copyBackForwardList(): WebBackForwardList? = null
 
-    override fun setFindListener(listener: WebView.FindListener): Unit = throw RuntimeException("Stub!")
+    override fun setFindListener(listener: WebView.FindListener) {}
 
-    override fun findNext(forward: Boolean): Unit = throw RuntimeException("Stub!")
+    override fun findNext(forward: Boolean) {}
 
-    override fun findAll(find: String): Int = throw RuntimeException("Stub!")
+    override fun findAll(find: String): Int = 0
 
-    override fun findAllAsync(find: String): Unit = throw RuntimeException("Stub!")
+    override fun findAllAsync(find: String) {}
 
     override fun showFindDialog(
         text: String,
         showIme: Boolean,
-    ): Boolean = throw RuntimeException("Stub!")
+    ): Boolean = false
 
-    override fun clearMatches(): Unit = throw RuntimeException("Stub!")
+    override fun clearMatches() {}
 
-    override fun documentHasImages(response: Message): Unit = throw RuntimeException("Stub!")
+    override fun documentHasImages(response: Message) {}
 
     override fun setWebViewClient(client: WebViewClient) {
         viewClient = client
@@ -837,16 +960,16 @@ class KcefWebViewProvider(
 
     override fun getWebViewClient(): WebViewClient = viewClient
 
-    override fun getWebViewRenderProcess(): WebViewRenderProcess? = throw RuntimeException("Stub!")
+    override fun getWebViewRenderProcess(): WebViewRenderProcess? = null
 
     override fun setWebViewRenderProcessClient(
         executor: Executor?,
         client: WebViewRenderProcessClient?,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
-    override fun getWebViewRenderProcessClient(): WebViewRenderProcessClient? = throw RuntimeException("Stub!")
+    override fun getWebViewRenderProcessClient(): WebViewRenderProcessClient? = null
 
-    override fun setDownloadListener(listener: DownloadListener): Unit = throw RuntimeException("Stub!")
+    override fun setDownloadListener(listener: DownloadListener) {}
 
     override fun setWebChromeClient(client: WebChromeClient) {
         chromeClient = client
@@ -854,7 +977,7 @@ class KcefWebViewProvider(
 
     override fun getWebChromeClient(): WebChromeClient = chromeClient
 
-    override fun setPictureListener(listener: PictureListener): Unit = throw RuntimeException("Stub!")
+    override fun setPictureListener(listener: PictureListener) {}
 
     @Serializable
     private data class FunctionCall(
@@ -888,54 +1011,56 @@ class KcefWebViewProvider(
         )
     }
 
-    override fun removeJavascriptInterface(interfaceName: String): Unit = throw RuntimeException("Stub!")
+    override fun removeJavascriptInterface(interfaceName: String) {
+        mappings.removeAll { it.interfaceName == interfaceName }
+    }
 
-    override fun createWebMessageChannel(): Array<WebMessagePort> = throw RuntimeException("Stub!")
+    override fun createWebMessageChannel(): Array<WebMessagePort> = emptyArray()
 
     override fun postMessageToMainFrame(
         message: WebMessage,
         targetOrigin: Uri,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
     override fun getSettings(): WebSettings = settings
 
-    override fun setMapTrackballToArrowKeys(setMap: Boolean): Unit = throw RuntimeException("Stub!")
+    override fun setMapTrackballToArrowKeys(setMap: Boolean) {}
 
     override fun flingScroll(
         vx: Int,
         vy: Int,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
-    override fun getZoomControls(): View = throw RuntimeException("Stub!")
+    override fun getZoomControls(): View? = null
 
-    override fun canZoomIn(): Boolean = throw RuntimeException("Stub!")
+    override fun canZoomIn(): Boolean = false
 
-    override fun canZoomOut(): Boolean = throw RuntimeException("Stub!")
+    override fun canZoomOut(): Boolean = false
 
-    override fun zoomBy(zoomFactor: Float): Boolean = throw RuntimeException("Stub!")
+    override fun zoomBy(zoomFactor: Float): Boolean = false
 
-    override fun zoomIn(): Boolean = throw RuntimeException("Stub!")
+    override fun zoomIn(): Boolean = false
 
-    override fun zoomOut(): Boolean = throw RuntimeException("Stub!")
+    override fun zoomOut(): Boolean = false
 
     override fun dumpViewHierarchyWithProperties(
         out: BufferedWriter,
         level: Int,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
     override fun findHierarchyView(
         className: String,
         hashCode: Int,
-    ): View = throw RuntimeException("Stub!")
+    ): View? = null
 
     override fun setRendererPriorityPolicy(
         rendererRequestedPriority: Int,
         waivedWhenNotVisible: Boolean,
-    ): Unit = throw RuntimeException("Stub!")
+    ) {}
 
-    override fun getRendererRequestedPriority(): Int = throw RuntimeException("Stub!")
+    override fun getRendererRequestedPriority(): Int = 0
 
-    override fun getRendererPriorityWaivedWhenNotVisible(): Boolean = throw RuntimeException("Stub!")
+    override fun getRendererPriorityWaivedWhenNotVisible(): Boolean = false
 
     @SuppressWarnings("unused")
     override fun setTextClassifier(textClassifier: TextClassifier?) {}
@@ -946,20 +1071,170 @@ class KcefWebViewProvider(
     // Provider internal methods
     // -------------------------------------------------------------------------
 
-    override fun getViewDelegate(): ViewDelegate = throw RuntimeException("Stub!")
+    override fun getViewDelegate(): ViewDelegate = viewDelegate
 
-    override fun getScrollDelegate(): ScrollDelegate = throw RuntimeException("Stub!")
+    override fun getScrollDelegate(): ScrollDelegate = scrollDelegate
 
-    override fun notifyFindDialogDismissed(): Unit = throw RuntimeException("Stub!")
+    override fun notifyFindDialogDismissed() {}
+
+    private fun executeBridgeWebview(
+        port: Int,
+        url: String,
+        headers: Map<String, String>? = null,
+        postData: ByteArray? = null,
+        scripts: List<String>? = null,
+    ) {
+        Thread {
+            try {
+                val jsonPayload =
+                    buildJsonObject {
+                        put("url", JsonPrimitive(url))
+                        headers?.let { h ->
+                            put(
+                                "headers",
+                                buildJsonObject {
+                                    h.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                                },
+                            )
+                        }
+                        postData?.let {
+                            put("postData", JsonPrimitive(String(it, Charsets.UTF_8)))
+                        }
+                        scripts?.let { s ->
+                            put(
+                                "scripts",
+                                buildJsonArray {
+                                    s.forEach { add(JsonPrimitive(it)) }
+                                },
+                            )
+                        }
+                        put("time", JsonPrimitive(20))
+                    }
+
+                val conn =
+                    (
+                        java.net
+                            .URI("http://127.0.0.1:$port/bridge_webview")
+                            .toURL()
+                            .openConnection() as java.net.HttpURLConnection
+                    ).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 25000
+                        readTimeout = 25000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                    }
+                conn.outputStream.use { os ->
+                    os.write(jsonPayload.toString().toByteArray(Charsets.UTF_8))
+                }
+                val code = conn.responseCode
+                if (code == 200) {
+                    val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = Json { ignoreUnknownKeys = true }
+                    val responseObj = json.parseToJsonElement(responseStr).jsonObject
+
+                    val finalUrl = responseObj["url"]?.jsonPrimitive?.contentOrNull ?: url
+                    val html = responseObj["html"]?.jsonPrimitive?.contentOrNull
+                    currentUrl = finalUrl
+
+                    html?.let {
+                        urlHttpMapping[url.trimEnd('/')] = it
+                        urlHttpMapping[finalUrl.trimEnd('/')] = it
+                    }
+
+                    // Save cookies
+                    val cookiesArray = responseObj["cookies"]?.jsonArray
+                    val cookieManager = android.webkit.CookieManager.getInstance()
+                    cookiesArray?.forEach { element ->
+                        val cookieObj = element.jsonObject
+                        val name = cookieObj["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val value = cookieObj["value"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val domain = cookieObj["domain"]?.jsonPrimitive?.contentOrNull
+                        val path = cookieObj["path"]?.jsonPrimitive?.contentOrNull
+                        if (name.isNotEmpty()) {
+                            val cookieStr =
+                                buildString {
+                                    append("$name=$value")
+                                    domain?.let { append("; Domain=$it") }
+                                    path?.let { append("; Path=$it") }
+                                }
+                            cookieManager.setCookie(finalUrl, cookieStr)
+                        }
+                    }
+
+                    handler.post {
+                        chromeClient.onProgressChanged(view, 100)
+                        viewClient.onPageFinished(view, finalUrl)
+                    }
+                } else {
+                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
+                    Log.w(TAG, "Bridge returned error: $err")
+                    handler.post {
+                        viewClient.onReceivedError(view, WebViewClient.ERROR_UNKNOWN, err, url)
+                        viewClient.onPageFinished(view, url)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Bridge request failed for $url", e)
+                handler.post {
+                    viewClient.onReceivedError(
+                        view,
+                        WebViewClient.ERROR_HOST_LOOKUP,
+                        e.message ?: "Bridge request failed",
+                        url,
+                    )
+                    viewClient.onPageFinished(view, url)
+                }
+            }
+        }.start()
+    }
+
+    private fun executeBridgeJavascript(
+        port: Int,
+        url: String,
+        script: String,
+    ): String? {
+        val jsonPayload =
+            buildJsonObject {
+                put("url", JsonPrimitive(url))
+                put("scripts", buildJsonArray { add(JsonPrimitive(script)) })
+                put("time", JsonPrimitive(10))
+            }
+        val conn =
+            (
+                java.net
+                    .URI(
+                        "http://127.0.0.1:$port/evaluateJavascriptViaWebview",
+                    ).toURL()
+                    .openConnection() as java.net.HttpURLConnection
+            ).apply {
+                requestMethod = "POST"
+                connectTimeout = 12000
+                readTimeout = 12000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+        conn.outputStream.use { os ->
+            os.write(jsonPayload.toString().toByteArray(Charsets.UTF_8))
+        }
+        val code = conn.responseCode
+        if (code == 200) {
+            val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = Json { ignoreUnknownKeys = true }
+            val responseObj = json.parseToJsonElement(responseStr).jsonObject
+            return responseObj["result"]?.jsonPrimitive?.contentOrNull
+        }
+        return null
+    }
 
     // -------------------------------------------------------------------------
     // View / ViewGroup delegation methods
     // -------------------------------------------------------------------------
 
     class KcefViewDelegate : ViewDelegate {
-        override fun shouldDelayChildPressedState(): Boolean = throw RuntimeException("Stub!")
+        override fun shouldDelayChildPressedState(): Boolean = false
 
-        override fun onProvideVirtualStructure(structure: android.view.ViewStructure): Unit = throw RuntimeException("Stub!")
+        override fun onProvideVirtualStructure(structure: android.view.ViewStructure) {}
 
         override fun onProvideAutofillVirtualStructure(
             @SuppressWarnings("unused") structure: android.view.ViewStructure,
@@ -972,29 +1247,27 @@ class KcefWebViewProvider(
 
         override fun isVisibleToUserForAutofill(
             @SuppressWarnings("unused") virtualId: Int,
-        ): Boolean {
-            return true // true is the default value returned by View.isVisibleToUserForAutofill()
-        }
+        ): Boolean = true
 
         override fun onProvideContentCaptureStructure(
             @SuppressWarnings("unused") structure: android.view.ViewStructure,
             @SuppressWarnings("unused") flags: Int,
         ) {}
 
-        override fun getAccessibilityNodeProvider(): AccessibilityNodeProvider = throw RuntimeException("Stub!")
+        override fun getAccessibilityNodeProvider(): AccessibilityNodeProvider? = null
 
-        override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo): Unit = throw RuntimeException("Stub!")
+        override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {}
 
-        override fun onInitializeAccessibilityEvent(event: AccessibilityEvent): Unit = throw RuntimeException("Stub!")
+        override fun onInitializeAccessibilityEvent(event: AccessibilityEvent) {}
 
         override fun performAccessibilityAction(
             action: Int,
             arguments: Bundle,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
-        override fun setOverScrollMode(mode: Int): Unit = throw RuntimeException("Stub!")
+        override fun setOverScrollMode(mode: Int) {}
 
-        override fun setScrollBarStyle(style: Int): Unit = throw RuntimeException("Stub!")
+        override fun setScrollBarStyle(style: Int) {}
 
         override fun onDrawVerticalScrollBar(
             canvas: Canvas,
@@ -1003,48 +1276,48 @@ class KcefWebViewProvider(
             t: Int,
             r: Int,
             b: Int,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
         override fun onOverScrolled(
             scrollX: Int,
             scrollY: Int,
             clampedX: Boolean,
             clampedY: Boolean,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
-        override fun onWindowVisibilityChanged(visibility: Int): Unit = throw RuntimeException("Stub!")
+        override fun onWindowVisibilityChanged(visibility: Int) {}
 
-        override fun onDraw(canvas: Canvas): Unit = throw RuntimeException("Stub!")
+        override fun onDraw(canvas: Canvas) {}
 
-        override fun setLayoutParams(layoutParams: LayoutParams): Unit = throw RuntimeException("Stub!")
+        override fun setLayoutParams(layoutParams: LayoutParams) {}
 
-        override fun performLongClick(): Boolean = throw RuntimeException("Stub!")
+        override fun performLongClick(): Boolean = false
 
-        override fun onConfigurationChanged(newConfig: Configuration): Unit = throw RuntimeException("Stub!")
+        override fun onConfigurationChanged(newConfig: Configuration) {}
 
-        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection = throw RuntimeException("Stub!")
+        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? = null
 
-        override fun onDragEvent(event: DragEvent): Boolean = throw RuntimeException("Stub!")
+        override fun onDragEvent(event: DragEvent): Boolean = false
 
         override fun onKeyMultiple(
             keyCode: Int,
             repeatCount: Int,
             event: KeyEvent,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
         override fun onKeyDown(
             keyCode: Int,
             event: KeyEvent,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
         override fun onKeyUp(
             keyCode: Int,
             event: KeyEvent,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
-        override fun onAttachedToWindow(): Unit = throw RuntimeException("Stub!")
+        override fun onAttachedToWindow() {}
 
-        override fun onDetachedFromWindow(): Unit = throw RuntimeException("Stub!")
+        override fun onDetachedFromWindow() {}
 
         override fun onMovedToDisplay(
             displayId: Int,
@@ -1054,87 +1327,85 @@ class KcefWebViewProvider(
         override fun onVisibilityChanged(
             changedView: View,
             visibility: Int,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
-        override fun onWindowFocusChanged(hasWindowFocus: Boolean): Unit = throw RuntimeException("Stub!")
+        override fun onWindowFocusChanged(hasWindowFocus: Boolean) {}
 
         override fun onFocusChanged(
             focused: Boolean,
             direction: Int,
             previouslyFocusedRect: Rect,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
         override fun setFrame(
             left: Int,
             top: Int,
             right: Int,
             bottom: Int,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
         override fun onSizeChanged(
             w: Int,
             h: Int,
             ow: Int,
             oh: Int,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
         override fun onScrollChanged(
             l: Int,
             t: Int,
             oldl: Int,
             oldt: Int,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean = throw RuntimeException("Stub!")
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean = false
 
-        override fun onTouchEvent(ev: MotionEvent): Boolean = throw RuntimeException("Stub!")
+        override fun onTouchEvent(ev: MotionEvent): Boolean = false
 
-        override fun onHoverEvent(event: MotionEvent): Boolean = throw RuntimeException("Stub!")
+        override fun onHoverEvent(event: MotionEvent): Boolean = false
 
-        override fun onGenericMotionEvent(event: MotionEvent): Boolean = throw RuntimeException("Stub!")
+        override fun onGenericMotionEvent(event: MotionEvent): Boolean = false
 
-        override fun onTrackballEvent(ev: MotionEvent): Boolean = throw RuntimeException("Stub!")
+        override fun onTrackballEvent(ev: MotionEvent): Boolean = false
 
         override fun requestFocus(
             direction: Int,
             previouslyFocusedRect: Rect,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
         override fun onMeasure(
             widthMeasureSpec: Int,
             heightMeasureSpec: Int,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
         override fun requestChildRectangleOnScreen(
             child: View,
             rect: Rect,
             immediate: Boolean,
-        ): Boolean = throw RuntimeException("Stub!")
+        ): Boolean = false
 
-        override fun setBackgroundColor(color: Int): Unit = throw RuntimeException("Stub!")
+        override fun setBackgroundColor(color: Int) {}
 
         override fun setLayerType(
             layerType: Int,
             paint: Paint,
-        ) {
-            // ignore
-        }
+        ) {}
 
-        override fun preDispatchDraw(canvas: Canvas): Unit = throw RuntimeException("Stub!")
+        override fun preDispatchDraw(canvas: Canvas) {}
 
-        override fun onStartTemporaryDetach(): Unit = throw RuntimeException("Stub!")
+        override fun onStartTemporaryDetach() {}
 
-        override fun onFinishTemporaryDetach(): Unit = throw RuntimeException("Stub!")
+        override fun onFinishTemporaryDetach() {}
 
         override fun onActivityResult(
             requestCode: Int,
             resultCode: Int,
             data: Intent,
-        ): Unit = throw RuntimeException("Stub!")
+        ) {}
 
-        override fun getHandler(originalHandler: Handler): Handler = throw RuntimeException("Stub!")
+        override fun getHandler(originalHandler: Handler): Handler = originalHandler
 
-        override fun findFocus(originalFocusedView: View): View = throw RuntimeException("Stub!")
+        override fun findFocus(originalFocusedView: View): View = originalFocusedView
 
         @SuppressWarnings("unused")
         override fun onCheckIsTextEditor(): Boolean = false
@@ -1150,16 +1421,16 @@ class KcefWebViewProvider(
     }
 
     class KcefScrollDelegate : ScrollDelegate {
-        override fun computeHorizontalScrollRange(): Int = throw RuntimeException("Stub!")
+        override fun computeHorizontalScrollRange(): Int = 0
 
-        override fun computeHorizontalScrollOffset(): Int = throw RuntimeException("Stub!")
+        override fun computeHorizontalScrollOffset(): Int = 0
 
-        override fun computeVerticalScrollRange(): Int = throw RuntimeException("Stub!")
+        override fun computeVerticalScrollRange(): Int = 0
 
-        override fun computeVerticalScrollOffset(): Int = throw RuntimeException("Stub!")
+        override fun computeVerticalScrollOffset(): Int = 0
 
-        override fun computeVerticalScrollExtent(): Int = throw RuntimeException("Stub!")
+        override fun computeVerticalScrollExtent(): Int = 0
 
-        override fun computeScroll(): Unit = throw RuntimeException("Stub!")
+        override fun computeScroll() {}
     }
 }

@@ -29,6 +29,17 @@ class DalvikHandler {
             // Deserialize DataBody
             val dataBody = objectMapper.readValue(json, DataBody::class.java)
 
+            val bridgePortHeader =
+                (
+                    session.headers[WEBVIEW_BRIDGE_PORT_HEADER]
+                        ?: session.headers["x-mangayomi-webview-port"]
+                        ?: session.headers["X-Mangayomi-Webview-Port"]
+                )
+            val bridgePort = bridgePortHeader?.toIntOrNull() ?: 0
+            if (bridgePort > 0) {
+                xyz.nulldev.androidcompat.webkit.KcefWebViewProvider.bridgePort = bridgePort
+            }
+
             val invocation =
                 MExtensionServerLoader.invokeWithExtension(dataBody.data, dataBody.extensionId) { loadedExtension ->
                     val selectedSource = MihonInvoker.selectSource(loadedExtension.sources, dataBody)
@@ -183,5 +194,8 @@ class DalvikHandler {
 
         /** Identifies which source of a multi-source extension the call is for. */
         const val SOURCE_BASE_URL_HEADER = "source-base-url"
+
+        /** Port of Mangayomi's local headless webview resolution server. */
+        const val WEBVIEW_BRIDGE_PORT_HEADER = "x-mangayomi-webview-port"
     }
 }
