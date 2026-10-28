@@ -20,8 +20,7 @@ fun AnimeSource.preferencesKey(): String = preferencesKey(id)
 /**
  * Gets instance of [SharedPreferences] scoped to the specific source key.
  */
-fun sourcePreferences(key: String): SharedPreferences =
-    Injekt.get<Application>().getSharedPreferences(key, Context.MODE_PRIVATE)
+fun sourcePreferences(key: String): SharedPreferences = Injekt.get<Application>().getSharedPreferences(key, Context.MODE_PRIVATE)
 
 /**
  * Gets instance of [SharedPreferences] scoped to the specific source.
