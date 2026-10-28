@@ -47,7 +47,7 @@ class CloudflareInterceptorTest {
         return OkHttpClient
             .Builder()
             .cookieJar(jar)
-            .addInterceptor(CloudflareInterceptor({ proxyUrl }, onUserAgent, jar::addAll))
+            .addInterceptor(CloudflareInterceptor({ proxyUrl }, { _, ua -> onUserAgent(ua) }, jar::addAll))
             .build()
     }
 
@@ -71,6 +71,58 @@ class CloudflareInterceptorTest {
             }
             assertEquals(1, solver.calls)
             assertEquals(SOLVED_UA, reportedUserAgent, "the solved user-agent must be kept for later requests")
+        } finally {
+            site.stop()
+            solver.stop()
+        }
+    }
+
+    @Test
+    fun `a solved host keeps the solver user-agent instead of the client one`() {
+        // Like Cloudflare, accept the clearance cookie only with the user-agent
+        // that solved the challenge.
+        val site =
+            object : NanoHTTPD(0) {
+                override fun serve(session: IHTTPSession): Response {
+                    val cleared =
+                        session.headers["cookie"]?.contains(CLEARANCE) == true &&
+                            session.headers["user-agent"] == SOLVED_UA
+                    return if (cleared) {
+                        newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
+                    } else {
+                        newFixedLengthResponse(Response.Status.FORBIDDEN, "text/html", "challenge").apply {
+                            addHeader("Server", "cloudflare")
+                        }
+                    }
+                }
+            }.apply { start() }
+        val solver = FakeSolver().apply { start() }
+
+        try {
+            // The same wiring as NetworkHelper: the client sends its own
+            // user-agent on every call, and a solve records one per host.
+            val solved = mutableMapOf<String, String>()
+            val jar = MemoryCookieJar()
+            val client =
+                OkHttpClient
+                    .Builder()
+                    .cookieJar(jar)
+                    .addInterceptor(UserAgentInterceptor { url -> solved[url.host] ?: "client-ua" })
+                    .addInterceptor(
+                        CloudflareInterceptor(
+                            { "http://localhost:${solver.listeningPort}/v1" },
+                            { host, ua -> solved[host] = ua },
+                            jar::addAll,
+                        ),
+                    ).build()
+
+            repeat(3) {
+                client
+                    .newCall(Request.Builder().url("http://localhost:${site.listeningPort}/").build())
+                    .execute()
+                    .use { assertEquals(200, it.code) }
+            }
+            assertEquals(1, solver.calls, "later requests must reuse the clearance instead of solving again")
         } finally {
             site.stop()
             solver.stop()
