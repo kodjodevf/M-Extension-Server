@@ -7,6 +7,8 @@ import okhttp3.Response
 class UserAgentInterceptor(
     private val userAgentProvider: (HttpUrl) -> String,
 ) : Interceptor {
+    constructor(userAgentProvider: () -> String) : this({ _ -> userAgentProvider() })
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
         val customUa = userAgentProvider(originalRequest.url).trim()

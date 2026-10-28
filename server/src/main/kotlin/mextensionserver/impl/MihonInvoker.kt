@@ -498,25 +498,75 @@ object MihonInvoker {
             val pages = source.getPageList(chapterData.toSChapter(source))
             val httpSource = source as? HttpSource
 
+            val overridesFetchImage =
+                if (httpSource != null) {
+                    try {
+                        val method =
+                            httpSource.javaClass.getMethod(
+                                "fetchImage",
+                                eu.kanade.tachiyomi.source.model.Page::class.java,
+                            )
+                        method.declaringClass != HttpSource::class.java
+                    } catch (_: Exception) {
+                        false
+                    }
+                } else {
+                    false
+                }
+            val isSpecialSource = httpSource != null && httpSource.id.toString() == KL_RAW_SOURCE_ID
+            val hasCustomInterceptors =
+                if (httpSource != null) {
+                    hasCustomClientInterceptors(httpSource)
+                } else {
+                    false
+                }
+
             pages.map { page ->
                 if (httpSource != null) {
-                    // Serve every page through the extension's own client. Sources fix
-                    // image requests in interceptors (headers a CDN insists on, retries,
-                    // rate limits), and a URL handed to the client with static headers
-                    // skips all of them: MangoLibreria's CDN answers those with a
-                    // placeholder, and MHScans' 1-request-per-3-s limit was bypassed.
-                    JPage(
-                        index = page.index,
-                        url = page.url,
-                        imageUrl =
-                            MihonImageProxy.register(source, page)
-                                ?: run {
-                                    if (page.imageUrl == null) {
-                                        page.imageUrl = source.getImageUrl(page)
-                                    }
-                                    source.imageRequest(page).url.toString()
-                                },
-                    )
+                    val rawImageUrl = page.imageUrl
+                    val isStandardHttpUrl =
+                        rawImageUrl != null &&
+                            (
+                                rawImageUrl.startsWith("http://", ignoreCase = true) ||
+                                    rawImageUrl.startsWith("https://", ignoreCase = true)
+                            ) &&
+                            !rawImageUrl.contains("#")
+
+                    val useProxy =
+                        overridesFetchImage ||
+                            isSpecialSource ||
+                            hasCustomInterceptors ||
+                            !isStandardHttpUrl ||
+                            hasSolvedClearanceForImage(httpSource, rawImageUrl)
+
+                    if (useProxy) {
+                        JPage(
+                            index = page.index,
+                            url = page.url,
+                            imageUrl =
+                                MihonImageProxy.register(source, page)
+                                    ?: run {
+                                        if (page.imageUrl == null) {
+                                            page.imageUrl = source.getImageUrl(page)
+                                        }
+                                        source.imageRequest(page).url.toString()
+                                    },
+                        )
+                    } else {
+                        val request = httpSource.imageRequest(page)
+                        val directUrl = request.url.toString()
+                        val reqHeaders = request.headers
+                        val headersMap =
+                            (0 until reqHeaders.size).associate {
+                                reqHeaders.name(it) to reqHeaders.value(it)
+                            }
+                        JPage(
+                            index = page.index,
+                            url = page.url,
+                            imageUrl = directUrl,
+                            headers = if (headersMap.isNotEmpty()) headersMap else null,
+                        )
+                    }
                 } else {
                     JPage(
                         index = page.index,
@@ -527,6 +577,48 @@ object MihonInvoker {
             }
         }
     }
+
+    private fun hasCustomClientInterceptors(httpSource: HttpSource): Boolean {
+        val overridesClient =
+            try {
+                httpSource.javaClass.getMethod("getClient").declaringClass != HttpSource::class.java
+            } catch (_: Exception) {
+                false
+            }
+        if (!overridesClient) return false
+
+        return runCatching {
+            val defaultClient = runCatching { httpSource.network.client }.getOrNull()
+            val sourceClient = httpSource.client
+            if (defaultClient != null) {
+                sourceClient.interceptors != defaultClient.interceptors ||
+                    sourceClient.networkInterceptors != defaultClient.networkInterceptors
+            } else {
+                sourceClient.interceptors.isNotEmpty() ||
+                    sourceClient.networkInterceptors.isNotEmpty()
+            }
+        }.getOrDefault(true)
+    }
+
+    private fun hasSolvedClearanceForImage(
+        httpSource: HttpSource,
+        rawImageUrl: String?,
+    ): Boolean =
+        runCatching {
+            val net = httpSource.network
+            val baseHost =
+                runCatching {
+                    okhttp3.HttpUrl.Companion.run { httpSource.baseUrl.toHttpUrl().host }
+                }.getOrNull()
+            val imageHost =
+                rawImageUrl?.let {
+                    runCatching {
+                        okhttp3.HttpUrl.Companion.run { it.toHttpUrl().host }
+                    }.getOrNull()
+                }
+            (baseHost != null && net.hasSolvedClearance(baseHost)) ||
+                (imageHost != null && net.hasSolvedClearance(imageHost))
+        }.getOrDefault(false)
 
     private fun invokeHeadersAnime(source: AnimeCatalogueSource): List<String> =
         if (source is AnimeHttpSource) {

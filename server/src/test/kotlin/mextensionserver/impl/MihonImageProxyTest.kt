@@ -164,6 +164,22 @@ class MihonImageProxyTest {
         assertEquals(1, source.pageRequestCount)
     }
 
+    @Test
+    fun `generates deterministic tokens across source instances and restarts`() {
+        val page = Page(0, "/ch1/p1", "https://example.test/ch1/01.jpg")
+        MihonImageProxy.configure(39641)
+        val firstPageUrl = requireNotNull(MihonImageProxy.register(TestHttpSource(), page))
+        val firstPosterUrl = requireNotNull(MihonImageProxy.registerPoster(TestHttpSource(), "Title", "https://example.test/cover.jpg"))
+
+        MihonImageProxy.clear()
+        MihonImageProxy.configure(45123)
+        val secondPageUrl = requireNotNull(MihonImageProxy.register(TestHttpSource(), page))
+        val secondPosterUrl = requireNotNull(MihonImageProxy.registerPoster(TestHttpSource(), "Title", "https://example.test/cover.jpg"))
+
+        assertEquals(URI(firstPageUrl).path, URI(secondPageUrl).path)
+        assertEquals(URI(firstPosterUrl).path, URI(secondPosterUrl).path)
+    }
+
     private open class TestHttpSource(
         private val brokenPosterOrigin: Boolean = false,
         pageResponseCodes: List<Int> = emptyList(),

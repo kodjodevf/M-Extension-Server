@@ -75,6 +75,8 @@ class NetworkHelper(
 
     fun userAgentFor(url: HttpUrl) = solvedUserAgents[url.host] ?: defaultUserAgent
 
+    fun hasSolvedClearance(host: String): Boolean = solvedUserAgents.containsKey(host)
+
     private var cloudflareProxyUrl: String = ""
 
     /** URL of a FlareSolverr- / Byparr-compatible proxy, or "" to disable. */

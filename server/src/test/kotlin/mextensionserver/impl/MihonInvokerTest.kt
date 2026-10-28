@@ -238,10 +238,7 @@ class MihonInvokerTest {
     }
 
     @Test
-    fun `serves standard HttpSource pages through the extension client`() {
-        // A direct URL would skip the interceptors the source fixes its image
-        // requests in, so even a plain https page goes through the proxy.
-        MihonImageProxy.configure(39641)
+    fun `returns direct imageUrl and headers for standard HttpSource`() {
         val jar = createTempFile(prefix = "mextensionserver-test-", suffix = ".jar").toFile()
         val packageInfo =
             PackageInfo().apply {
@@ -267,12 +264,45 @@ class MihonInvokerTest {
             ) as List<JPage>
 
         assertEquals(1, result.size)
+        assertEquals("https://cdn.example.test/ch1/01.jpg", result[0].imageUrl)
+        assertEquals("https://example.test/", result[0].headers?.get("Referer"))
+        extension.close()
+    }
+
+    @Test
+    fun `serves HttpSource pages with custom client interceptors through the proxy`() {
+        MihonImageProxy.configure(39641)
+        val jar = createTempFile(prefix = "mextensionserver-test-", suffix = ".jar").toFile()
+        val packageInfo =
+            PackageInfo().apply {
+                packageName = "eu.kanade.tachiyomi.extension.en.interceptortest"
+                versionName = "1.0.0"
+                versionCode = 1
+                applicationInfo = ApplicationInfo()
+            }
+        val source = InterceptorHttpSource()
+        val extension =
+            MExtensionServerLoader.LoadedExtension(
+                initialSources = listOf(source),
+                packageInfo = packageInfo,
+                jarFile = jar,
+                classLoader = URLClassLoader(emptyArray()),
+            )
+
+        @Suppress("UNCHECKED_CAST")
+        val result =
+            MihonInvoker.invokeMethod(
+                extension,
+                DataBody(method = "getPageList", chapterData = ChapterData(url = "/ch1")),
+            ) as List<JPage>
+
+        assertEquals(1, result.size)
         assertTrue(result[0].imageUrl?.startsWith("http://127.0.0.1:39641/image/") == true)
         extension.close()
         MihonImageProxy.clear()
     }
 
-    private class DirectHttpSource : HttpSource() {
+    private open class DirectHttpSource : HttpSource() {
         override val id = 100L
         override val name = "Direct source"
         override val lang = "en"
@@ -306,5 +336,20 @@ class MihonInvokerTest {
         override fun pageListParse(response: Response): List<Page> = error("unused")
 
         override fun imageUrlParse(response: Response): String = error("unused")
+    }
+
+    private class InterceptorHttpSource : DirectHttpSource() {
+        override val client: okhttp3.OkHttpClient =
+            okhttp3.OkHttpClient
+                .Builder()
+                .addInterceptor { chain ->
+                    chain.proceed(
+                        chain
+                            .request()
+                            .newBuilder()
+                            .removeHeader("Referer")
+                            .build(),
+                    )
+                }.build()
     }
 }

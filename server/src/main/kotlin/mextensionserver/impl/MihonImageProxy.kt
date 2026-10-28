@@ -11,7 +11,7 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
-import java.util.UUID
+import java.security.MessageDigest
 
 /**
  * Keeps image requests inside the extension's OkHttp client.
@@ -52,7 +52,6 @@ internal object MihonImageProxy {
 
     private val lock = Any()
     private val entriesByToken = LinkedHashMap<String, Entry>(16, 0.75f, true)
-    private val tokensByKey = mutableMapOf<String, String>()
 
     @Volatile
     private var port: Int = 0
@@ -71,33 +70,25 @@ internal object MihonImageProxy {
 
         val key =
             buildString {
-                append(System.identityHashCode(source))
-                append('\u0000')
+                append(source.id)
+                append("\u0000page\u0000")
                 append(page.index)
                 append('\u0000')
                 append(page.url)
                 append('\u0000')
                 append(page.imageUrl.orEmpty())
             }
-        val token =
-            synchronized(lock) {
-                tokensByKey[key]?.let { existingToken ->
-                    entriesByToken[existingToken] = PageEntry(key, source, page)
-                    return@synchronized existingToken
-                }
-
+        val token = tokenForKey(key)
+        synchronized(lock) {
+            if (!entriesByToken.containsKey(token)) {
                 while (entriesByToken.size >= MAX_ENTRIES) {
                     val iterator = entriesByToken.entries.iterator()
-                    val eldest = iterator.next()
+                    iterator.next()
                     iterator.remove()
-                    tokensByKey.remove(eldest.value.key)
-                }
-
-                UUID.randomUUID().toString().also { newToken ->
-                    entriesByToken[newToken] = PageEntry(key, source, page)
-                    tokensByKey[key] = newToken
                 }
             }
+            entriesByToken[token] = PageEntry(key, source, page)
+        }
 
         return proxyUrl(currentPort, token)
     }
@@ -113,48 +104,42 @@ internal object MihonImageProxy {
 
         val key =
             buildString {
-                append(System.identityHashCode(source))
+                append(source.id)
                 append("\u0000poster\u0000")
                 append(title)
                 append('\u0000')
                 append(url)
             }
-        val token =
-            synchronized(lock) {
-                tokensByKey[key]?.let { existingToken ->
-                    entriesByToken[existingToken] =
-                        PosterEntry(
-                            key = key,
-                            source = source,
-                            title = title,
-                            originalUrl = url,
-                            resolver = resolver,
-                        )
-                    return@synchronized existingToken
-                }
-
+        val token = tokenForKey(key)
+        synchronized(lock) {
+            val existing = entriesByToken[token] as? PosterEntry
+            if (existing == null) {
                 while (entriesByToken.size >= MAX_ENTRIES) {
                     val iterator = entriesByToken.entries.iterator()
-                    val eldest = iterator.next()
+                    iterator.next()
                     iterator.remove()
-                    tokensByKey.remove(eldest.value.key)
-                }
-
-                UUID.randomUUID().toString().also { newToken ->
-                    entriesByToken[newToken] =
-                        PosterEntry(
-                            key = key,
-                            source = source,
-                            title = title,
-                            originalUrl = url,
-                            resolver = resolver,
-                        )
-                    tokensByKey[key] = newToken
                 }
             }
+            entriesByToken[token] =
+                PosterEntry(
+                    key = key,
+                    source = source,
+                    title = title,
+                    originalUrl = url,
+                    resolver = resolver,
+                    originalFailed = existing?.originalFailed ?: false,
+                    resolvedUrl = existing?.resolvedUrl,
+                )
+        }
 
         return proxyUrl(currentPort, token)
     }
+
+    private fun tokenForKey(key: String): String =
+        MessageDigest
+            .getInstance("SHA-256")
+            .digest(key.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     fun fetch(token: String): ImageData? {
         val entry = synchronized(lock) { entriesByToken[token] } ?: return null
@@ -282,7 +267,6 @@ internal object MihonImageProxy {
     fun clear() {
         synchronized(lock) {
             entriesByToken.clear()
-            tokensByKey.clear()
         }
         port = 0
     }
