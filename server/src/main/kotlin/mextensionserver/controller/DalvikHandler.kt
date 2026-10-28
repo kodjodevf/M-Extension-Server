@@ -56,8 +56,8 @@ class DalvikHandler {
                             }
                         }
 
-                    val ua = (session.headers["user-agent"] ?: session.headers["User-Agent"])
-                    if (ua != null) {
+                    val ua = (session.headers["user-agent"] ?: session.headers["User-Agent"])?.trim()
+                    if (!ua.isNullOrEmpty() && !ua.startsWith("Dart/", ignoreCase = true)) {
                         network?.setUA(ua)
                     }
 

@@ -220,6 +220,37 @@ class MihonVideoProxyTest {
         assertTrue(bodyClosed)
     }
 
+    @Test
+    fun `registers and serves local subtitle files over loopback proxy`() {
+        val tempSubFile = java.io.File.createTempFile("subs_test", ".srt")
+        tempSubFile.deleteOnExit()
+        val srtContent = "1\n00:00:01,000 --> 00:00:04,000\nHello World\n"
+        tempSubFile.writeText(srtContent)
+
+        MihonVideoProxy.configure(39642)
+        val track =
+            eu.kanade.tachiyomi.animesource.model.Track(
+                url = tempSubFile.toURI().toString(),
+                lang = "English",
+            )
+        val proxiedTrack =
+            MihonVideoProxy.proxyTrack(
+                client = OkHttpClient(),
+                headers = Headers.Builder().build(),
+                track = track,
+            )
+
+        assertTrue(proxiedTrack.url.startsWith("http://127.0.0.1:39642/video/"))
+        assertTrue(proxiedTrack.url.endsWith(".srt"))
+        assertEquals("English", proxiedTrack.lang)
+
+        val response = assertNotNull(MihonVideoProxy.fetch(proxiedTrack.url.token()))
+        assertEquals(200, response.statusCode)
+        assertEquals("application/x-subrip", response.contentType)
+        assertEquals("*", response.responseHeaders["Access-Control-Allow-Origin"])
+        assertEquals(srtContent, response.stream.use { it.readBytes().decodeToString() })
+    }
+
     private fun String.token(): String = URI(this).path.substringAfterLast('/')
 
     private fun String.proxyTokens(): Set<String> =

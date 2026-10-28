@@ -41,8 +41,9 @@ internal object MihonVideoProxy {
     private data class Entry(
         val key: String,
         val client: OkHttpClient,
-        val url: HttpUrl,
+        val url: HttpUrl?,
         val headers: Headers,
+        val localFile: java.io.File? = null,
     )
 
     private val loopbackClient =
@@ -71,8 +72,14 @@ internal object MihonVideoProxy {
     ): Video {
         val client = source.client
         val headers =
-            video.headers
-                ?: runCatching { source.headers }.getOrDefault(Headers.Builder().build())
+            runCatching {
+                val defaultHeaders = source.headers
+                val builder = defaultHeaders.newBuilder()
+                video.headers?.forEach { (name, value) ->
+                    builder.set(name, value)
+                }
+                builder.build()
+            }.getOrDefault(video.headers ?: Headers.Builder().build())
         val proxiedVideoUrl =
             video.videoUrl?.let { register(client, it, headers, suffixHint = video.url.mediaFileSuffix()) }
                 ?: video.videoUrl
@@ -80,11 +87,18 @@ internal object MihonVideoProxy {
             url = video.url.ifEmpty { video.videoUrl.orEmpty() },
             quality = video.quality,
             videoUrl = proxiedVideoUrl,
-            headers = video.headers,
+            headers = headers,
             subtitleTracks = video.subtitleTracks.map { proxyTrack(client, headers, it) },
             audioTracks = video.audioTracks.map { proxyTrack(client, headers, it) },
             timestamps = video.timestamps,
-        )
+        ).also {
+            it.resolution = video.resolution
+            it.bitrate = video.bitrate
+            it.preferred = video.preferred
+            it.mpvArgs = video.mpvArgs
+            it.ffmpegStreamArgs = video.ffmpegStreamArgs
+            it.ffmpegVideoArgs = video.ffmpegVideoArgs
+        }
     }
 
     internal fun register(
@@ -135,16 +149,69 @@ internal object MihonVideoProxy {
         return proxyUrl(currentPort, token, target, suffixHint)
     }
 
+    fun registerLocalFile(
+        file: java.io.File,
+        suffixHint: String? = null,
+    ): String? {
+        val currentPort = port
+        if (currentPort <= 0 || !file.exists()) {
+            return null
+        }
+        val key = "file\u0000${file.absolutePath}"
+        val token =
+            synchronized(lock) {
+                tokensByKey[key]?.let { existingToken ->
+                    entriesByToken[existingToken] =
+                        Entry(key, loopbackClient, null, Headers.Builder().build(), file)
+                    return@synchronized existingToken
+                }
+
+                while (entriesByToken.size >= MAX_ENTRIES) {
+                    val iterator = entriesByToken.entries.iterator()
+                    val eldest = iterator.next()
+                    iterator.remove()
+                    tokensByKey.remove(eldest.value.key)
+                }
+
+                UUID.randomUUID().toString().also { newToken ->
+                    entriesByToken[newToken] =
+                        Entry(key, loopbackClient, null, Headers.Builder().build(), file)
+                    tokensByKey[key] = newToken
+                }
+            }
+        val suffix = suffixHint ?: if (file.extension.isNotEmpty()) ".${file.extension}" else ""
+        return "http://127.0.0.1:$currentPort/video/$token$suffix"
+    }
+
     fun fetch(
         token: String,
         range: String? = null,
     ): VideoData? {
         val registryToken = token.substringBefore('.')
         val entry = synchronized(lock) { entriesByToken[registryToken] } ?: return null
+        if (entry.localFile != null) {
+            if (!entry.localFile.exists()) return null
+            val mimeType =
+                when {
+                    entry.localFile.name.endsWith(".srt", ignoreCase = true) -> "application/x-subrip"
+                    entry.localFile.name.endsWith(".vtt", ignoreCase = true) -> "text/vtt"
+                    entry.localFile.name.endsWith(".ass", ignoreCase = true) -> "text/x-ssa"
+                    else -> "text/plain; charset=utf-8"
+                }
+            return VideoData(
+                statusCode = 200,
+                contentType = mimeType,
+                stream = entry.localFile.inputStream(),
+                contentLength = entry.localFile.length(),
+                responseHeaders = mapOf("Access-Control-Allow-Origin" to "*"),
+            )
+        }
+
+        val targetUrl = entry.url ?: return null
         val request =
             Request
                 .Builder()
-                .url(entry.url)
+                .url(targetUrl)
                 .headers(entry.headers)
                 .apply {
                     // Extension-owned loopback M3U8 servers often forward the
@@ -152,7 +219,7 @@ internal object MihonVideoProxy {
                     // Supplying gzip explicitly disables OkHttp's transparent
                     // decompression there, so compressed playlists and media
                     // can be parsed as if they were raw HLS bytes.
-                    if (entry.url.isLoopback()) {
+                    if (targetUrl.isLoopback()) {
                         header("Accept-Encoding", "identity")
                     }
                     if (!range.isNullOrBlank()) {
@@ -160,7 +227,7 @@ internal object MihonVideoProxy {
                     }
                 }.build()
 
-        val requestClient = if (entry.url.isLoopback()) loopbackClient else entry.client
+        val requestClient = if (targetUrl.isLoopback()) loopbackClient else entry.client
         val response = requestClient.newCall(request).execute()
         try {
             val body = requireNotNull(response.body) { "Extension returned an empty video response" }
@@ -189,7 +256,7 @@ internal object MihonVideoProxy {
                 )
             }
 
-            if (response.isSuccessful && entry.url.isLoopback() && contentType.contains("mp2t", ignoreCase = true)) {
+            if (response.isSuccessful && targetUrl.isLoopback() && contentType.contains("mp2t", ignoreCase = true)) {
                 val bytes = body.bytes()
                 val repaired = MpegTsSanitizer.repair(bytes)
                 response.close()
@@ -215,15 +282,34 @@ internal object MihonVideoProxy {
         }
     }
 
-    private fun proxyTrack(
+    internal fun proxyTrack(
         client: OkHttpClient,
         headers: Headers,
         track: Track,
-    ): Track =
-        Track(
+    ): Track {
+        val url = track.url
+        if (url.startsWith("file://", ignoreCase = true) || url.startsWith("file:", ignoreCase = true)) {
+            val file =
+                runCatching {
+                    if (url.startsWith("file://", ignoreCase = true)) {
+                        java.io.File(java.net.URI(url))
+                    } else {
+                        java.io.File(url.removePrefix("file:"))
+                    }
+                }.getOrNull() ?: java.io.File(url.removePrefix("file://"))
+            if (file.exists()) {
+                val registered =
+                    registerLocalFile(file, if (file.name.endsWith(".srt", ignoreCase = true)) ".srt" else null)
+                if (registered != null) {
+                    return Track(url = registered, lang = track.lang)
+                }
+            }
+        }
+        return Track(
             url = register(client, track.url, headers) ?: track.url,
             lang = track.lang,
         )
+    }
 
     private fun rewriteManifest(
         client: OkHttpClient,

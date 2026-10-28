@@ -54,6 +54,8 @@ import mextensionserver.model.toJAnime
 import mextensionserver.model.toJChapter
 import mextensionserver.model.toJEpisode
 import mextensionserver.model.toJManga
+import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.ConcurrentHashMap
@@ -641,6 +643,44 @@ object MihonInvoker {
                 (imageHost != null && net.hasSolvedClearance(imageHost))
         }.getOrDefault(false)
 
+    private fun isLoopback(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val httpUrl = url.toHttpUrlOrNull() ?: return false
+        val host = httpUrl.host
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    private fun hasSolvedClearanceForVideo(
+        source: AnimeHttpSource,
+        videoUrl: String?,
+    ): Boolean =
+        runCatching {
+            val net = source.network
+            val baseHost =
+                runCatching {
+                    okhttp3.HttpUrl.Companion.run { source.baseUrl.toHttpUrl().host }
+                }.getOrNull()
+            val videoHost =
+                videoUrl?.let {
+                    runCatching {
+                        okhttp3.HttpUrl.Companion.run { it.toHttpUrl().host }
+                    }.getOrNull()
+                }
+            (baseHost != null && net.hasSolvedClearance(baseHost)) ||
+                (videoHost != null && net.hasSolvedClearance(videoHost))
+        }.getOrDefault(false)
+
+    private fun shouldProxyVideo(
+        source: AnimeHttpSource,
+        video: Video,
+    ): Boolean {
+        if (video.usesHttpServer()) return true
+        val targetUrl = video.videoUrl ?: video.url
+        if (isLoopback(targetUrl)) return true
+        if (hasSolvedClearanceForVideo(source, targetUrl)) return true
+        return false
+    }
+
     private fun invokeHeadersAnime(source: AnimeCatalogueSource): List<String> =
         if (source is AnimeHttpSource) {
             val headers =
@@ -956,7 +996,36 @@ object MihonInvoker {
                 results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
             }
             videos.map { video ->
-                MihonVideoProxy.proxy(source, video)
+                val fallbackHeaders =
+                    runCatching {
+                        val defaultHeaders = source.headers
+                        val builder = defaultHeaders.newBuilder()
+                        video.headers?.forEach { (name, value) ->
+                            builder.set(name, value)
+                        }
+                        builder.build()
+                    }.getOrDefault(video.headers ?: Headers.Builder().build())
+
+                if (shouldProxyVideo(source, video)) {
+                    MihonVideoProxy.proxy(source, video)
+                } else {
+                    Video(
+                        url = video.url.ifEmpty { video.videoUrl.orEmpty() },
+                        quality = video.quality,
+                        videoUrl = video.videoUrl,
+                        headers = fallbackHeaders,
+                        subtitleTracks = video.subtitleTracks.map { MihonVideoProxy.proxyTrack(source.client, fallbackHeaders, it) },
+                        audioTracks = video.audioTracks.map { MihonVideoProxy.proxyTrack(source.client, fallbackHeaders, it) },
+                        timestamps = video.timestamps,
+                    ).also {
+                        it.resolution = video.resolution
+                        it.bitrate = video.bitrate
+                        it.preferred = video.preferred
+                        it.mpvArgs = video.mpvArgs
+                        it.ffmpegStreamArgs = video.ffmpegStreamArgs
+                        it.ffmpegVideoArgs = video.ffmpegVideoArgs
+                    }
+                }
             }
         }
     }
