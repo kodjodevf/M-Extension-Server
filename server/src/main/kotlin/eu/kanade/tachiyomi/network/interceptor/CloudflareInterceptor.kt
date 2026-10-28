@@ -57,7 +57,6 @@ class CloudflareInterceptor(
             .build()
     }
 
-    @Synchronized
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
         val response = chain.proceed(originalRequest)
@@ -86,6 +85,9 @@ class CloudflareInterceptor(
         return chain.proceed(applySolution(originalRequest, solution))
     }
 
+    // Only one challenge is solved at a time; locking intercept() as a whole
+    // also queued every normal request from every extension behind each other.
+    @Synchronized
     private fun solve(
         proxyUrl: String,
         targetUrl: String,
