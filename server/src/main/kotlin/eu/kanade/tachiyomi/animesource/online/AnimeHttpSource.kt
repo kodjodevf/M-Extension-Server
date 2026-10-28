@@ -1,11 +1,15 @@
 package eu.kanade.tachiyomi.animesource.online
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
 import eu.kanade.tachiyomi.animesource.model.Hoster
+import eu.kanade.tachiyomi.animesource.model.HttpServer
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
+import eu.kanade.tachiyomi.animesource.model.ThumbnailInfo
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -37,6 +41,13 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * Base url of the website without the trailing slash, like: http://mysite.com
      */
     abstract val baseUrl: String
+
+    /**
+     * Returns the base (home) URL of the website as a string.
+     *
+     * @return The website’s home page URL. Defaults to [baseUrl].
+     */
+    open fun getHomeUrl(): String = baseUrl
 
     /**
      * Version id used to generate the source id. If the site completely changes and urls are
@@ -113,6 +124,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @param page the page number to retrieve.
      */
+    @Suppress("DEPRECATION")
     @Deprecated(
         "Use the non-RxJava API instead",
         ReplaceWith("getPopularAnime"),
@@ -128,14 +140,14 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @param page the page number to retrieve.
      */
-    protected abstract fun popularAnimeRequest(page: Int): Request
+    protected open fun popularAnimeRequest(page: Int): Request = throw UnsupportedOperationException()
 
     /**
      * Parses the response from the site and returns a [AnimesPage] object.
      *
      * @param response the response from the site.
      */
-    protected abstract fun popularAnimeParse(response: Response): AnimesPage
+    protected open fun popularAnimeParse(response: Response): AnimesPage = throw UnsupportedOperationException()
 
     /**
      * Returns an observable containing a page with a list of anime. Normally it's not needed to
@@ -145,6 +157,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @param query the search query.
      * @param filters the list of filters to apply.
      */
+    @Suppress("DEPRECATION")
     @Deprecated(
         "Use the non-RxJava API instead",
         ReplaceWith("getSearchAnime"),
@@ -172,24 +185,25 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @param query the search query.
      * @param filters the list of filters to apply.
      */
-    protected abstract fun searchAnimeRequest(
+    protected open fun searchAnimeRequest(
         page: Int,
         query: String,
         filters: AnimeFilterList,
-    ): Request
+    ): Request = throw UnsupportedOperationException()
 
     /**
      * Parses the response from the site and returns a [AnimesPage] object.
      *
      * @param response the response from the site.
      */
-    protected abstract fun searchAnimeParse(response: Response): AnimesPage
+    protected open fun searchAnimeParse(response: Response): AnimesPage = throw UnsupportedOperationException()
 
     /**
      * Returns an observable containing a page with a list of latest anime updates.
      *
      * @param page the page number to retrieve.
      */
+    @Suppress("DEPRECATION")
     @Deprecated(
         "Use the non-RxJava API instead",
         ReplaceWith("getLatestUpdates"),
@@ -205,14 +219,14 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @param page the page number to retrieve.
      */
-    protected abstract fun latestUpdatesRequest(page: Int): Request
+    protected open fun latestUpdatesRequest(page: Int): Request = throw UnsupportedOperationException()
 
     /**
      * Parses the response from the site and returns a [AnimesPage] object.
      *
      * @param response the response from the site.
      */
-    protected abstract fun latestUpdatesParse(response: Response): AnimesPage
+    protected open fun latestUpdatesParse(response: Response): AnimesPage = throw UnsupportedOperationException()
 
     /**
      * Get the updated details for a anime.
@@ -224,6 +238,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
     @Suppress("DEPRECATION")
     override suspend fun getAnimeDetails(anime: SAnime): SAnime = fetchAnimeDetails(anime).awaitSingle()
 
+    @Suppress("DEPRECATION")
     @Deprecated("Use the non-RxJava API instead", replaceWith = ReplaceWith("getAnimeDetails"))
     override fun fetchAnimeDetails(anime: SAnime): Observable<SAnime> =
         client
@@ -246,7 +261,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @param response the response from the site.
      */
-    protected abstract fun animeDetailsParse(response: Response): SAnime
+    protected open fun animeDetailsParse(response: Response): SAnime = throw UnsupportedOperationException()
 
     /**
      * Get all the available episodes for an anime.
@@ -265,6 +280,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
         return fetchEpisodeList(anime).awaitSingle()
     }
 
+    @Suppress("DEPRECATION")
     @Deprecated("Use the non-RxJava API instead", replaceWith = ReplaceWith("getEpisodeList"))
     override fun fetchEpisodeList(anime: SAnime): Observable<List<SEpisode>> =
         if (anime.status != SAnime.LICENSED) {
@@ -289,7 +305,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @param response the response from the site.
      */
-    protected abstract fun episodeListParse(response: Response): List<SEpisode>
+    protected open fun episodeListParse(response: Response): List<SEpisode> = throw UnsupportedOperationException()
 
     /**
      * Parses the response from the site and returns a SEpisode Object.
@@ -297,6 +313,22 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @param response the response from the site.
      */
     protected open fun episodeVideoParse(response: Response): SEpisode = throw UnsupportedOperationException()
+
+    /**
+     * Get all the available seasons for an anime.
+     *
+     * @since extensions-lib 16
+     */
+    @Suppress("DEPRECATION")
+    override suspend fun getSeasonList(anime: SAnime): List<SAnime> =
+        client
+            .newCall(seasonListRequest(anime))
+            .awaitSuccess()
+            .use(::seasonListParse)
+
+    protected open fun seasonListRequest(anime: SAnime): Request = GET(baseUrl + anime.url, headers)
+
+    protected open fun seasonListParse(response: Response): List<SAnime> = throw UnsupportedOperationException()
 
     /**
      * Get the list of videos a episode has. Videos should be returned
@@ -347,7 +379,8 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @since extensions-lib 16
      * @param episode the episode.
      */
-    open suspend fun getHosterList(episode: SEpisode): List<Hoster> =
+    @Suppress("DEPRECATION")
+    override suspend fun getHosterList(episode: SEpisode): List<Hoster> =
         client
             .newCall(hosterListRequest(episode))
             .awaitSuccess()
@@ -376,12 +409,12 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @since extensions-lib 16
      * @param hoster the hoster to resolve.
      */
-    open suspend fun getVideoList(hoster: Hoster): List<Video> =
+    @Suppress("DEPRECATION")
+    override suspend fun getVideoList(hoster: Hoster): List<Video> =
         client
             .newCall(videoListRequest(hoster))
             .awaitSuccess()
             .use { videoListParse(it, hoster) }
-            .let { with(this) { it.sortVideos() } }
 
     /**
      * Returns the request for resolving a hoster. Override only if it's needed to override
@@ -405,6 +438,38 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
     ): List<Video> = throw UnsupportedOperationException()
 
     /**
+     * Returns the resolved video of the episode link. Override only if it's needed to resolve
+     * the video.
+     *
+     * @since extensions-lib 16
+     */
+    open suspend fun resolveVideo(video: Video): Video? = video
+
+    /**
+     * Enable the use of a local http server.
+     *
+     * @since extensions-lib 17
+     */
+    open fun createHttpServer(): HttpServer? = null
+
+    /**
+     * Return info for thumbnails to be used as a preview when seeking.
+     *
+     * @since extensions-lib 17
+     */
+    open suspend fun getVideoThumbnails(video: Video): ThumbnailInfo? = null
+
+    /**
+     * Return bitmap for the image tiles.
+     *
+     * @since extensions-lib 17
+     */
+    open suspend fun getImageTile(url: String): Bitmap? =
+        client.newCall(GET(url, headers)).execute().body.byteStream().use {
+            BitmapFactory.decodeStream(it)
+        }
+
+    /**
      * Sorts the hoster list. Override this according to the user's preference.
      *
      * @since extensions-lib 16
@@ -416,7 +481,10 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @since extensions-lib 16
      */
-    protected open fun List<Video>.sortVideos(): List<Video> = this
+    open fun List<Video>.sortVideos(): List<Video> {
+        @Suppress("DEPRECATION")
+        return sort()
+    }
 
     /**
      * Returns an observable with the page containing the source url of the image. If there's any
@@ -428,7 +496,8 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
     @Suppress("DEPRECATION")
     open suspend fun getVideoUrl(video: Video): String = fetchVideoUrl(video).awaitSingle()
 
-    @Deprecated("Use the non-RxJava API instead", replaceWith = ReplaceWith("getVideoUrl"))
+    @Suppress("DEPRECATION")
+    @Deprecated("Use resolveVideo for lazy loading instead", replaceWith = ReplaceWith("resolveVideo"))
     open fun fetchVideoUrl(video: Video): Observable<String> =
         client
             .newCall(videoUrlRequest(video))
@@ -448,7 +517,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @param response the response from the site.
      */
-    protected abstract fun videoUrlParse(response: Response): String
+    protected open fun videoUrlParse(response: Response): String = throw UnsupportedOperationException()
 
     /**
      * Returns the response of the source video.

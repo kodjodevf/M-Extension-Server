@@ -9,13 +9,19 @@ import androidx.preference.Preference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
+import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilter
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
+import eu.kanade.tachiyomi.animesource.model.FetchType
+import eu.kanade.tachiyomi.animesource.model.Hoster
+import eu.kanade.tachiyomi.animesource.model.Hoster.Companion.toHosterList
+import eu.kanade.tachiyomi.animesource.model.HttpServer
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
+import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -23,6 +29,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +45,7 @@ import mextensionserver.model.DataBody
 import mextensionserver.model.EpisodeData
 import mextensionserver.model.JAnime
 import mextensionserver.model.JChapter
+import mextensionserver.model.JEpisode
 import mextensionserver.model.JFilterList
 import mextensionserver.model.JManga
 import mextensionserver.model.JPage
@@ -45,9 +53,11 @@ import mextensionserver.model.MangaData
 import mextensionserver.model.MangaResponse
 import mextensionserver.model.toJAnime
 import mextensionserver.model.toJChapter
+import mextensionserver.model.toJEpisode
 import mextensionserver.model.toJManga
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
 
 object MihonInvoker {
@@ -55,6 +65,7 @@ object MihonInvoker {
     private const val BRIDGE_CONTEXT_KEY = "__mangayomi_bridge_context__"
     private const val REPLACE_PRESENT_PREFERENCES = "replace-present"
     private const val KL_RAW_SOURCE_ID = "7433897302034602657"
+    private val sourceHttpServers = ConcurrentHashMap<Long, HttpServer>()
 
     // ponytail: one fixed budget for every hoster; make it a setting if a slow but
     // working hoster (a FlareSolverr solve can take ~20 s) keeps getting cut off.
@@ -711,8 +722,16 @@ object MihonInvoker {
             throw IllegalArgumentException("Source must be AnimeHttpSource for getDetailsAnime")
         }
 
+        val sAnime = animeData.toSAnime()
         return runBlocking {
-            val detailedAnime = source.getAnimeDetails(animeData.toSAnime())
+            val detailedAnime =
+                try {
+                    source.getAnimeDetails(sAnime)
+                } catch (_: UnsupportedOperationException) {
+                    source.getAnimeEpisodeUpdate(sAnime, emptyList(), fetchDetails = true, fetchEpisodes = false).anime
+                } catch (_: NotImplementedError) {
+                    source.getAnimeEpisodeUpdate(sAnime, emptyList(), fetchDetails = true, fetchEpisodes = false).anime
+                }
             detailedAnime.toJAnime()
         }
     }
@@ -733,7 +752,7 @@ object MihonInvoker {
     private fun invokeGetEpisodeList(
         source: AnimeCatalogueSource,
         animeData: AnimeData?,
-    ): List<SEpisode> {
+    ): List<JEpisode> {
         if (animeData == null) {
             throw IllegalArgumentException("animeData is required for getEpisodeList")
         }
@@ -742,11 +761,64 @@ object MihonInvoker {
             throw IllegalArgumentException("Source must be AnimeHttpSource for getEpisodeList")
         }
 
+        val sAnime = animeData.toSAnime()
         return runBlocking {
-            val episodes = source.getEpisodeList(animeData.toSAnime())
-            episodes
+            val episodes = fetchEpisodesWithSeasons(source, sAnime)
+            episodes.map { it.toJEpisode() }
         }
     }
+
+    private suspend fun fetchEpisodesWithSeasons(
+        source: AnimeHttpSource,
+        sAnime: SAnime,
+        depth: Int = 0,
+    ): List<SEpisode> {
+        if (depth < 2 && sAnime.fetch_type == FetchType.Seasons && checkHasSeasons(source)) {
+            val seasons =
+                runCatching { source.getSeasonList(sAnime) }
+                    .getOrDefault(emptyList())
+            if (seasons.isNotEmpty()) {
+                return flattenSeasonEpisodes(source, seasons, depth)
+            }
+        }
+
+        return try {
+            source.getEpisodeList(sAnime)
+        } catch (e: UnsupportedOperationException) {
+            if (depth < 2 && checkHasSeasons(source)) {
+                val seasons = source.getSeasonList(sAnime)
+                flattenSeasonEpisodes(source, seasons, depth)
+            } else {
+                source.getAnimeEpisodeUpdate(sAnime, emptyList(), fetchDetails = false, fetchEpisodes = true).episodes
+            }
+        } catch (e: NotImplementedError) {
+            if (depth < 2 && checkHasSeasons(source)) {
+                val seasons = source.getSeasonList(sAnime)
+                flattenSeasonEpisodes(source, seasons, depth)
+            } else {
+                source.getAnimeEpisodeUpdate(sAnime, emptyList(), fetchDetails = false, fetchEpisodes = true).episodes
+            }
+        }
+    }
+
+    private suspend fun flattenSeasonEpisodes(
+        source: AnimeHttpSource,
+        seasons: List<SAnime>,
+        depth: Int,
+    ): List<SEpisode> =
+        seasons.flatMap { season ->
+            val seasonTitle = runCatching { season.title.trim() }.getOrDefault("")
+            val seasonEpisodes =
+                runCatching { fetchEpisodesWithSeasons(source, season, depth + 1) }
+                    .getOrDefault(emptyList())
+            seasonEpisodes.map { episode ->
+                if (seasonTitle.isNotEmpty() && !episode.name.contains(seasonTitle, ignoreCase = true)) {
+                    episode.apply { name = "$seasonTitle - $name" }
+                } else {
+                    episode
+                }
+            }
+        }
 
     private fun invokeGetEpisodeUrl(
         source: AnimeCatalogueSource,
@@ -761,6 +833,58 @@ object MihonInvoker {
         return source.getEpisodeUrl(episodeData.toSEpisode())
     }
 
+    private fun checkHasHosters(source: AnimeHttpSource): Boolean {
+        var current: Class<in AnimeHttpSource> = source.javaClass
+        while (true) {
+            if (current == ParsedAnimeHttpSource::class.java ||
+                current == AnimeHttpSource::class.java ||
+                current == AnimeSource::class.java
+            ) {
+                return false
+            }
+            if (current.declaredMethods.any {
+                    it.name in
+                        listOf(
+                            "getHosterList",
+                            "hosterListRequest",
+                            "hosterListParse",
+                            "hosterListSelector",
+                            "hosterFromElement",
+                        )
+                }
+            ) {
+                return true
+            }
+            current = current.superclass ?: return false
+        }
+    }
+
+    private fun checkHasSeasons(source: AnimeHttpSource): Boolean {
+        var current: Class<in AnimeHttpSource> = source.javaClass
+        while (true) {
+            if (current == ParsedAnimeHttpSource::class.java ||
+                current == AnimeHttpSource::class.java ||
+                current == AnimeSource::class.java
+            ) {
+                return false
+            }
+            if (current.declaredMethods.any {
+                    it.name in
+                        listOf(
+                            "getSeasonList",
+                            "seasonListRequest",
+                            "seasonListParse",
+                            "seasonListSelector",
+                            "seasonFromElement",
+                        )
+                }
+            ) {
+                return true
+            }
+            current = current.superclass ?: return false
+        }
+    }
+
     private fun invokeGetVideoList(
         source: AnimeCatalogueSource,
         episodeData: EpisodeData?,
@@ -773,22 +897,48 @@ object MihonInvoker {
             throw IllegalArgumentException("Source must be AnimeHttpSource for getVideoList")
         }
 
+        val sEpisode = episodeData.toSEpisode()
         return runBlocking {
-            // extensions-lib 16 splits video retrieval in two: list the hosters, then
-            // resolve each one. A legacy source answers with a single hoster that already
-            // carries its videos (Hoster.NO_HOSTER_LIST), so both shapes flatten the same
-            // way and the client keeps receiving one flat list.
-            val hosters = with(source) { source.getHosterList(episodeData.toSEpisode()).sortHosters() }
+            // Mirror Aniyomi's EpisodeLoader.getHostersOnHttp: inspect the runtime class
+            // hierarchy before calling getHosterList so legacy extensions (lib 14/15) go
+            // straight to getVideoList(episode) without making a wasted HTTP call or
+            // crashing with UnsupportedOperationException.
+            val hosters: List<Hoster> =
+                if (checkHasHosters(source)) {
+                    try {
+                        with(source) { source.getHosterList(sEpisode).sortHosters() }
+                    } catch (_: UnsupportedOperationException) {
+                        with(source) { source.getVideoList(sEpisode).sortVideos().toHosterList() }
+                    } catch (_: NotImplementedError) {
+                        with(source) { source.getVideoList(sEpisode).sortVideos().toHosterList() }
+                    }
+                } else {
+                    try {
+                        with(source) { source.getVideoList(sEpisode).sortVideos().toHosterList() }
+                    } catch (_: UnsupportedOperationException) {
+                        with(source) { source.getHosterList(sEpisode).sortHosters() }
+                    } catch (_: NotImplementedError) {
+                        with(source) { source.getHosterList(sEpisode).sortHosters() }
+                    }
+                }
+
             // Resolve hosters in parallel and stop waiting after HOSTER_TIMEOUT_MS: one
             // hoster stuck behind Cloudflare must not hold back the ones that work.
-            // Extractors block in OkHttp, so a late one is abandoned rather than cancelled
-            // and finishes on its own thread.
             val hosterScope = CoroutineScope(Dispatchers.IO)
             val results =
                 hosters
                     .map { hoster ->
-                        hoster.videoList?.let { CompletableDeferred(Result.success(it)) }
-                            ?: hosterScope.async { runCatching { source.getVideoList(hoster) } }
+                        hosterScope.async {
+                            runCatching {
+                                val rawVideos =
+                                    hoster.videoList
+                                        ?: source.getVideoList(hoster)
+                                val sortedVideos = with(source) { rawVideos.sortVideos() }
+                                sortedVideos.mapNotNull { video ->
+                                    resolveSingleVideo(source, hoster.hosterName, video)
+                                }
+                            }
+                        }
                     }.map { deferred ->
                         withTimeoutOrNull(HOSTER_TIMEOUT_MS) { deferred.await() }
                             ?: Result.failure(TimeoutException("Hoster timed out after ${HOSTER_TIMEOUT_MS}ms"))
@@ -797,29 +947,120 @@ object MihonInvoker {
             results.forEachIndexed { i, result ->
                 result.exceptionOrNull()?.let { logger.warn(it) { "Hoster ${hosters[i].hosterName} failed" } }
             }
-            val videos = results.flatMap { it.getOrDefault(emptyList()) }
+            val videos =
+                results
+                    .flatMap { it.getOrDefault(emptyList()) }
+                    .sortedByDescending { it.preferred }
             // An empty list makes the client wait for videos that never come, so
             // report why when every hoster failed.
             if (videos.isEmpty()) {
                 results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
             }
             videos.map { video ->
-                val resolvedVideo =
-                    if (video.videoUrl.isNullOrEmpty() || video.status == Video.LOAD_VIDEO) {
-                        runCatching {
-                            val resolvedUrl = source.getVideoUrl(video)
-                            video.apply {
-                                videoUrl = resolvedUrl
-                                status = Video.READY
-                            }
-                        }.getOrDefault(video)
-                    } else {
-                        video
-                    }
-                MihonVideoProxy.proxy(source, resolvedVideo)
+                MihonVideoProxy.proxy(source, video)
             }
         }
     }
+
+    private suspend fun resolveSingleVideo(
+        source: AnimeHttpSource,
+        hosterName: String,
+        video: Video,
+    ): Video? {
+        val resolved =
+            if (!video.initialized) {
+                try {
+                    source.resolveVideo(video) ?: return null
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    video
+                }
+            } else {
+                video
+            }
+
+        val currentVideoUrl = resolved.videoUrl
+        val withUrl =
+            if (currentVideoUrl.isNullOrEmpty() || currentVideoUrl == "null" || resolved.status == Video.LOAD_VIDEO) {
+                if (resolved.url.isNotEmpty() && resolved.url != "null") {
+                    runCatching {
+                        val fetchedUrl = source.getVideoUrl(resolved)
+                        resolved.copy(videoUrl = fetchedUrl, initialized = true).also {
+                            it.status = Video.READY
+                        }
+                    }.getOrDefault(resolved)
+                } else {
+                    resolved
+                }
+            } else {
+                resolved
+            }
+
+        val finalUrl = withUrl.videoUrl?.takeIf { it.isNotBlank() && it != "null" } ?: return null
+        val withServerPort =
+            if (withUrl.usesHttpServer()) {
+                val port = ensureHttpServerPort(source)
+                if (port > 0) withUrl.copyHttpServer(port) else withUrl
+            } else {
+                withUrl
+            }
+
+        val formattedQuality = formatVideoQuality(hosterName, withServerPort.quality)
+        val effectiveVideoUrl = withServerPort.videoUrl ?: finalUrl
+        val originalUrl = withServerPort.url.takeIf { it.isNotBlank() && it != "null" } ?: effectiveVideoUrl
+        return Video(
+            url = originalUrl,
+            quality = formattedQuality,
+            videoUrl = effectiveVideoUrl,
+            headers = withServerPort.headers,
+            subtitleTracks = withServerPort.subtitleTracks,
+            audioTracks = withServerPort.audioTracks,
+            timestamps = withServerPort.timestamps,
+        ).also {
+            it.resolution = withServerPort.resolution
+            it.bitrate = withServerPort.bitrate
+            it.preferred = withServerPort.preferred
+            it.mpvArgs = withServerPort.mpvArgs
+            it.ffmpegStreamArgs = withServerPort.ffmpegStreamArgs
+            it.ffmpegVideoArgs = withServerPort.ffmpegVideoArgs
+            it.internalData = withServerPort.internalData
+            it.initialized = true
+            it.memo = withServerPort.memo
+            it.status = Video.READY
+        }
+    }
+
+    private fun formatVideoQuality(
+        hosterName: String,
+        quality: String,
+    ): String {
+        val cleanHoster = hosterName.trim()
+        val cleanQuality = quality.trim()
+        if (cleanHoster.isEmpty() || cleanHoster == Hoster.NO_HOSTER_LIST) {
+            return cleanQuality.ifEmpty { "Default" }
+        }
+        if (cleanQuality.isEmpty()) {
+            return cleanHoster
+        }
+        if (cleanQuality.contains(cleanHoster, ignoreCase = true)) {
+            return cleanQuality
+        }
+        return "$cleanHoster - $cleanQuality"
+    }
+
+    private fun ensureHttpServerPort(source: AnimeHttpSource): Int =
+        runCatching {
+            val server =
+                sourceHttpServers.compute(source.id) { _, existing ->
+                    if (existing != null && existing.isRunning()) {
+                        existing
+                    } else {
+                        existing?.runCatching { stop() }
+                        source.createHttpServer()?.also { it.start() }
+                    }
+                }
+            server?.listeningPort ?: 0
+        }.getOrDefault(0)
 
     private fun MangaData.toSManga(source: Source): SManga =
         SManga.create().also { manga ->
@@ -851,7 +1092,9 @@ object MihonInvoker {
 
     private fun AnimeData.toSAnime(): SAnime =
         SAnime.create().also { anime ->
-            anime.url = url ?: ""
+            val decodedUrl = BridgeMemo.decode(url ?: "")
+            anime.url = decodedUrl.url
+            anime.memo = decodedUrl.memo
             anime.title = title ?: ""
             anime.artist = artist
             anime.author = author
@@ -864,7 +1107,9 @@ object MihonInvoker {
 
     private fun EpisodeData.toSEpisode(): SEpisode =
         SEpisode.create().also { episode ->
-            episode.url = url ?: ""
+            val decodedUrl = BridgeMemo.decode(url ?: "")
+            episode.url = decodedUrl.url
+            episode.memo = decodedUrl.memo
             episode.name = name ?: ""
             episode.date_upload = date_upload ?: 0L
             episode.episode_number = episode_number ?: 0f

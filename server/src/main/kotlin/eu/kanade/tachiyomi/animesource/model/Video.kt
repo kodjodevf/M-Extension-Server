@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.animesource.model
 import android.net.Uri
 import com.fasterxml.jackson.annotation.JsonIgnore
 import eu.kanade.tachiyomi.network.ProgressListener
+import kotlinx.serialization.json.JsonObject
 import okhttp3.Headers
 import rx.subjects.Subject
 
@@ -72,6 +73,40 @@ open class Video(
         ffmpegVideoArgs: List<Pair<String, String>> = emptyList(),
         internalData: String = "",
         initialized: Boolean = false,
+    ) : this(
+        videoUrl = videoUrl,
+        videoTitle = videoTitle,
+        resolution = resolution,
+        bitrate = bitrate,
+        headers = headers,
+        preferred = preferred,
+        subtitleTracks = subtitleTracks,
+        audioTracks = audioTracks,
+        timestamps = timestamps,
+        mpvArgs = mpvArgs,
+        ffmpegStreamArgs = ffmpegStreamArgs,
+        ffmpegVideoArgs = ffmpegVideoArgs,
+        internalData = internalData,
+        initialized = initialized,
+        memo = JsonObject(emptyMap()),
+    )
+
+    constructor(
+        videoUrl: String,
+        videoTitle: String = "",
+        resolution: Int? = null,
+        bitrate: Int? = null,
+        headers: Headers? = null,
+        preferred: Boolean = false,
+        subtitleTracks: List<Track> = emptyList(),
+        audioTracks: List<Track> = emptyList(),
+        timestamps: List<TimeStamp> = emptyList(),
+        mpvArgs: List<Pair<String, String>> = emptyList(),
+        ffmpegStreamArgs: List<Pair<String, String>> = emptyList(),
+        ffmpegVideoArgs: List<Pair<String, String>> = emptyList(),
+        internalData: String = "",
+        initialized: Boolean = false,
+        memo: JsonObject = JsonObject(emptyMap()),
     ) : this(videoUrl, videoTitle, videoUrl, headers, subtitleTracks, audioTracks, timestamps) {
         this.resolution = resolution
         this.bitrate = bitrate
@@ -81,9 +116,10 @@ open class Video(
         this.ffmpegVideoArgs = ffmpegVideoArgs
         this.internalData = internalData
         this.initialized = initialized
+        this.memo = memo
     }
 
-    // The lib 16 fields stay out of the JSON sent to the client, which keeps
+    // The lib 16/17 fields stay out of the JSON sent to the client, which keeps
     // reading url/quality/videoUrl.
     @get:JsonIgnore
     val videoTitle: String get() = quality
@@ -111,6 +147,9 @@ open class Video(
 
     @get:JsonIgnore
     var initialized: Boolean = false
+
+    @get:JsonIgnore
+    var memo: JsonObject = JsonObject(emptyMap())
 
     fun copy(
         videoUrl: String = this.videoUrl ?: url,
@@ -143,7 +182,73 @@ open class Video(
             ffmpegVideoArgs,
             internalData,
             initialized,
+            this.memo,
         )
+
+    fun copy(
+        videoUrl: String = this.videoUrl ?: url,
+        videoTitle: String = this.videoTitle,
+        resolution: Int? = this.resolution,
+        bitrate: Int? = this.bitrate,
+        headers: Headers? = this.headers,
+        preferred: Boolean = this.preferred,
+        subtitleTracks: List<Track> = this.subtitleTracks,
+        audioTracks: List<Track> = this.audioTracks,
+        timestamps: List<TimeStamp> = this.timestamps,
+        mpvArgs: List<Pair<String, String>> = this.mpvArgs,
+        ffmpegStreamArgs: List<Pair<String, String>> = this.ffmpegStreamArgs,
+        ffmpegVideoArgs: List<Pair<String, String>> = this.ffmpegVideoArgs,
+        internalData: String = this.internalData,
+        initialized: Boolean = this.initialized,
+        memo: JsonObject = this.memo,
+    ): Video =
+        Video(
+            videoUrl,
+            videoTitle,
+            resolution,
+            bitrate,
+            headers,
+            preferred,
+            subtitleTracks,
+            audioTracks,
+            timestamps,
+            mpvArgs,
+            ffmpegStreamArgs,
+            ffmpegVideoArgs,
+            internalData,
+            initialized,
+            memo,
+        )
+
+    fun usesHttpServer(): Boolean {
+        val currentVideoUrl = videoUrl ?: url
+        if (localUrl.find(currentVideoUrl) != null) {
+            return true
+        }
+        if (audioTracks.any { localUrl.find(it.url) != null }) {
+            return true
+        }
+        if (subtitleTracks.any { localUrl.find(it.url) != null }) {
+            return true
+        }
+        return false
+    }
+
+    fun copyHttpServer(port: Int): Video {
+        val newHost = "http://localhost:$port"
+        val currentVideoUrl = videoUrl ?: url
+        return this.copy(
+            videoUrl = localUrl.replace(currentVideoUrl, newHost),
+            subtitleTracks =
+                subtitleTracks.map {
+                    it.copy(url = localUrl.replace(it.url, newHost))
+                },
+            audioTracks =
+                audioTracks.map {
+                    it.copy(url = localUrl.replace(it.url, newHost))
+                },
+        )
+    }
 
     @Transient
     @Volatile
@@ -230,5 +335,7 @@ open class Video(
         const val DOWNLOAD_IMAGE = 2
         const val READY = 3
         const val ERROR = 4
+        const val MPV_ARGS_TAG = "ANIYOMI_MPV_ARGS"
+        private val localUrl = Regex("""http:\/\/localhost:1(?!\d)""")
     }
 }

@@ -1,5 +1,10 @@
 package mextensionserver.impl
 
+import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
+import eu.kanade.tachiyomi.animesource.model.Hoster
+import eu.kanade.tachiyomi.animesource.model.SEpisode
+import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SChapter
@@ -8,9 +13,11 @@ import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import mextensionserver.model.EpisodeData
 import mextensionserver.model.JChapter
 import mextensionserver.model.JManga
 import mextensionserver.model.MangaData
+import okhttp3.OkHttpClient
 import rx.Observable
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -101,6 +108,45 @@ class TachiyomiXCompatibilityTest {
         assertSame(memo, restoredChapter.memo)
     }
 
+    @Test
+    fun `legacy anime source uses getVideoList without calling getHosterList`() {
+        val source = LegacyAnimeSource()
+        val videos = invokeVideos(source)
+
+        assertEquals(1, source.videoListCalls)
+        assertEquals(1, videos.size)
+        assertEquals("1080p", videos.first().quality)
+        assertEquals("https://cdn.example.com/legacy.mp4", videos.first().url)
+    }
+
+    @Test
+    fun `lib 16 anime source resolves hosters, prefixes hoster name and sorts preferred first`() {
+        val source = Lib16AnimeSource()
+        val videos = invokeVideos(source)
+
+        assertEquals(2, videos.size)
+        assertEquals("Sendvid - 1080p", videos[0].quality)
+        assertEquals("https://cdn.example.com/sendvid-resolved.m3u8", videos[0].url)
+        assertEquals("Vidmoly - 720p", videos[1].quality)
+        assertEquals("https://cdn.example.com/vidmoly.mp4", videos[1].url)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun invokeVideos(source: AnimeCatalogueSource): List<Video> {
+        val method =
+            MihonInvoker::class.java.getDeclaredMethod(
+                "invokeGetVideoList",
+                AnimeCatalogueSource::class.java,
+                EpisodeData::class.java,
+            )
+        method.isAccessible = true
+        return method.invoke(
+            MihonInvoker,
+            source,
+            EpisodeData(url = "/ep/1", name = "Episode 1", date_upload = 0L, episode_number = 1f, scanlator = null),
+        ) as List<Video>
+    }
+
     private fun invokeDetails(source: Source): JManga {
         val method =
             MihonInvoker::class.java.getDeclaredMethod(
@@ -169,6 +215,62 @@ class TachiyomiXCompatibilityTest {
             chapterRequests++
             return Observable.just(listOf(newChapter("Legacy chapter")))
         }
+    }
+
+    private class LegacyAnimeSource : AnimeHttpSource() {
+        override val name = "Legacy Anime"
+        override val baseUrl = "https://anime.example.com"
+        override val lang = "en"
+        override val supportsLatest = false
+        override val client: OkHttpClient = OkHttpClient()
+        var videoListCalls = 0
+
+        override suspend fun getVideoList(episode: SEpisode): List<Video> {
+            videoListCalls++
+            return listOf(Video("https://cdn.example.com/legacy.mp4", "1080p", "https://cdn.example.com/legacy.mp4"))
+        }
+    }
+
+    private class Lib16AnimeSource : AnimeHttpSource() {
+        override val name = "Lib16 Anime"
+        override val baseUrl = "https://anime.example.com"
+        override val lang = "en"
+        override val supportsLatest = false
+        override val client: OkHttpClient = OkHttpClient()
+
+        override suspend fun getHosterList(episode: SEpisode): List<Hoster> =
+            listOf(
+                Hoster(hosterUrl = "https://vidmoly.example.com/e/1", hosterName = "Vidmoly"),
+                Hoster(hosterUrl = "https://sendvid.example.com/e/1", hosterName = "Sendvid"),
+            )
+
+        override suspend fun getVideoList(hoster: Hoster): List<Video> =
+            when (hoster.hosterName) {
+                "Vidmoly" ->
+                    listOf(
+                        Video(
+                            videoUrl = "https://cdn.example.com/vidmoly.mp4",
+                            videoTitle = "720p",
+                            initialized = true,
+                        ),
+                    )
+                "Sendvid" ->
+                    listOf(
+                        Video(
+                            videoUrl = "https://sendvid.example.com/unresolved",
+                            videoTitle = "1080p",
+                            preferred = true,
+                            initialized = false,
+                        ),
+                    )
+                else -> emptyList()
+            }
+
+        override suspend fun resolveVideo(video: Video): Video =
+            video.copy(
+                videoUrl = "https://cdn.example.com/sendvid-resolved.m3u8",
+                initialized = true,
+            )
     }
 
     private companion object {

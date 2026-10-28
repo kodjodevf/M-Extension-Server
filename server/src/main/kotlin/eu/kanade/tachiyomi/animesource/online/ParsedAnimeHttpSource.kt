@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.animesource.online
 
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
@@ -167,6 +168,59 @@ abstract class ParsedAnimeHttpSource : AnimeHttpSource() {
     protected abstract fun episodeFromElement(element: Element): SEpisode
 
     /**
+     * Parses the response from the site and returns a list of seasons.
+     *
+     * @since extensions-lib 16
+     * @param response the response from the site.
+     */
+    override fun seasonListParse(response: Response): List<SAnime> {
+        val document = response.asJsoup()
+        return document.select(seasonListSelector()).map(::seasonFromElement)
+    }
+
+    /**
+     * Returns the Jsoup selector that returns a list of [Element] corresponding to each season.
+     *
+     * @since extensions-lib 16
+     */
+    protected open fun seasonListSelector(): String = throw UnsupportedOperationException()
+
+    /**
+     * Returns a season from the given element.
+     *
+     * @since extensions-lib 16
+     * @param element an element obtained from [seasonListSelector].
+     */
+    protected open fun seasonFromElement(element: Element): SAnime = throw UnsupportedOperationException()
+
+    /**
+     * Parses the response from the site and returns the hoster list.
+     *
+     * @since extensions-lib 16
+     * @param response the response from the site.
+     * @return the list of hosters.
+     */
+    override fun hosterListParse(response: Response): List<Hoster> {
+        val document = response.asJsoup()
+        return document.select(hosterListSelector()).map(::hosterFromElement)
+    }
+
+    /**
+     * Returns the Jsoup selector that returns a list of [Element] corresponding to each hoster.
+     *
+     * @since extensions-lib 16
+     */
+    protected open fun hosterListSelector(): String = throw UnsupportedOperationException()
+
+    /**
+     * Returns a hoster from the given element.
+     *
+     * @since extensions-lib 16
+     * @param element an element obtained from [hosterListSelector].
+     */
+    protected open fun hosterFromElement(element: Element): Hoster = throw UnsupportedOperationException()
+
+    /**
      * Parses the response from the site and returns the page list.
      *
      * @param response the response from the site.
@@ -179,14 +233,14 @@ abstract class ParsedAnimeHttpSource : AnimeHttpSource() {
     /**
      * Returns the Jsoup selector that returns a list of [Element] corresponding to each video.
      */
-    protected abstract fun videoListSelector(): String
+    protected open fun videoListSelector(): String = throw UnsupportedOperationException()
 
     /**
      * Returns a video from the given element.
      *
      * @param element an element obtained from [videoListSelector].
      */
-    protected abstract fun videoFromElement(element: Element): Video
+    protected open fun videoFromElement(element: Element): Video = throw UnsupportedOperationException()
 
     /**
      * Parse the response from the site and returns the absolute url to the source video.
@@ -200,5 +254,5 @@ abstract class ParsedAnimeHttpSource : AnimeHttpSource() {
      *
      * @param document the parsed document.
      */
-    protected abstract fun videoUrlParse(document: Document): String
+    protected open fun videoUrlParse(document: Document): String = throw UnsupportedOperationException()
 }

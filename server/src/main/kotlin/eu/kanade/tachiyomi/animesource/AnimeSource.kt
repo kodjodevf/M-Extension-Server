@@ -1,6 +1,12 @@
 package eu.kanade.tachiyomi.animesource
 
+import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
+import eu.kanade.tachiyomi.animesource.model.AnimeRelation
+import eu.kanade.tachiyomi.animesource.model.AnimesPage
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
+import eu.kanade.tachiyomi.animesource.model.SAnimeEpisodeUpdate
+import eu.kanade.tachiyomi.animesource.model.SAnimeSeasonUpdate
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.util.lang.awaitSingle
@@ -22,6 +28,102 @@ interface AnimeSource {
 
     val lang: String
         get() = ""
+
+    /**
+     * Whether the source has support for latest updates.
+     */
+    val supportsLatest: Boolean
+
+    /**
+     * Returns the list of filters for the source.
+     */
+    fun getFilterList(): AnimeFilterList = AnimeFilterList()
+
+    /**
+     * Get a page with a list of anime.
+     *
+     * @since extensions-lib 17
+     * @param page the page number to retrieve.
+     */
+    suspend fun getPopularAnime(page: Int): AnimesPage
+
+    /**
+     * Get a page with a list of latest anime updates.
+     *
+     * @since extensions-lib 17
+     * @param page the page number to retrieve.
+     */
+    suspend fun getLatestUpdates(page: Int): AnimesPage
+
+    /**
+     * Get a page with a list of anime.
+     *
+     * @since extensions-lib 17
+     * @param page the page number to retrieve.
+     * @param query the search query.
+     * @param filters the list of filters to apply.
+     */
+    suspend fun getSearchAnime(
+        page: Int,
+        query: String,
+        filters: AnimeFilterList,
+    ): AnimesPage
+
+    /**
+     * Fetches updated information for an anime.
+     *
+     * @since extensions-lib 17
+     */
+    suspend fun getAnimeEpisodeUpdate(
+        anime: SAnime,
+        episodes: List<SEpisode>,
+        fetchDetails: Boolean,
+        fetchEpisodes: Boolean,
+    ): SAnimeEpisodeUpdate
+
+    /**
+     * Fetches updated information for an anime seasons.
+     *
+     * @since extensions-lib 17
+     */
+    suspend fun getAnimeSeasonUpdate(
+        anime: SAnime,
+        seasons: List<SAnime>,
+        fetchDetails: Boolean,
+        fetchSeasons: Boolean,
+    ): SAnimeSeasonUpdate
+
+    /**
+     * Whether this source supports related anime list for an entry
+     *
+     * @since extensions-lib 17
+     */
+    val supportsRelatedAnime: Boolean
+        get() = false
+
+    /**
+     * Get anime related to [anime], grouped by relation label
+     *
+     * @since extensions-lib 17
+     */
+    suspend fun getRelatedAnimeList(anime: SAnime): List<AnimeRelation>
+
+    /**
+     * Get the list of hoster for an episode.
+     *
+     * @since extensions-lib 16
+     */
+    suspend fun getHosterList(episode: SEpisode): List<Hoster> = throw IllegalStateException("Not used")
+
+    /**
+     * Get the list of videos for a hoster.
+     *
+     * @since extensions-lib 16
+     */
+    suspend fun getVideoList(hoster: Hoster): List<Video> = throw IllegalStateException("Not used")
+
+    @Deprecated("Use the combined suspend API instead", ReplaceWith("getAnimeSeasonUpdate"))
+    suspend fun getSeasonList(anime: SAnime): List<SAnime> = throw UnsupportedOperationException()
 
     /**
      * Get the updated details for a anime.

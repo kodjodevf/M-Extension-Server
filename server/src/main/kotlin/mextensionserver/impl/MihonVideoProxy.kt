@@ -77,12 +77,13 @@ internal object MihonVideoProxy {
             video.videoUrl?.let { register(client, it, headers, suffixHint = video.url.mediaFileSuffix()) }
                 ?: video.videoUrl
         return Video(
-            url = video.url,
+            url = video.url.ifEmpty { video.videoUrl.orEmpty() },
             quality = video.quality,
             videoUrl = proxiedVideoUrl,
             headers = video.headers,
             subtitleTracks = video.subtitleTracks.map { proxyTrack(client, headers, it) },
             audioTracks = video.audioTracks.map { proxyTrack(client, headers, it) },
+            timestamps = video.timestamps,
         )
     }
 
