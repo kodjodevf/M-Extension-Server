@@ -24,21 +24,20 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Solves Cloudflare challenges through an external FlareSolverr- / Byparr-
- * compatible proxy, when the client supplies one.
+ * compatible proxy when the client supplies one, and otherwise in a WebView
+ * hosted by the client (see [WebViewCloudflareSolver]).
  *
  * Extensions make their requests here, not in the client, so this interceptor
- * is the only place that ever sees the challenge. Until now it did nothing, and
- * there is no local fallback either: [xyz.nulldev.androidcompat.webkit.KcefWebViewProvider]
- * is registered as the WebView provider but `KCEF.init` is never called, so no
- * browser is available to solve one. A challenged source simply failed.
+ * is the only place that ever sees the challenge.
  *
- * Does nothing when no proxy URL has been supplied, which keeps the previous
- * behaviour for every client that does not set one.
+ * Does nothing when neither is available, which keeps the previous behaviour
+ * for every client that offers neither.
  */
 class CloudflareInterceptor(
     private val proxyUrl: () -> String,
     private val setUserAgent: (host: String, userAgent: String) -> Unit,
     private val storeCookies: (HttpUrl, List<Cookie>) -> Unit,
+    private val webViewSolver: WebViewCloudflareSolver? = null,
 ) : Interceptor {
     private val logger = KotlinLogging.logger {}
 
@@ -66,9 +65,9 @@ class CloudflareInterceptor(
         }
 
         val url = proxyUrl().trim()
-        val bridgePort = xyz.nulldev.androidcompat.webkit.KcefWebViewProvider.bridgePort
-        if (url.isEmpty() && bridgePort <= 0) {
-            logger.debug { "Cloudflare challenge on ${originalRequest.url.host}, but neither proxy nor bridge is configured" }
+        val solver = webViewSolver?.takeIf { it.isAvailable }
+        if (url.isEmpty() && solver == null) {
+            logger.debug { "Cloudflare challenge on ${originalRequest.url.host}, but neither a proxy nor a WebView is available" }
             return response
         }
 
@@ -79,7 +78,7 @@ class CloudflareInterceptor(
                 if (url.isNotEmpty()) {
                     solve(url, originalRequest.url.toString())
                 } else {
-                    solveWithBridge(bridgePort, originalRequest.url.toString())
+                    solveWithWebView(solver!!, originalRequest)
                 }
             } catch (e: Exception) {
                 logger.warn(e) { "Solve call failed, returning the original response" }
@@ -91,64 +90,14 @@ class CloudflareInterceptor(
     }
 
     @Synchronized
-    private fun solveWithBridge(
-        port: Int,
-        targetUrl: String,
+    private fun solveWithWebView(
+        solver: WebViewCloudflareSolver,
+        request: Request,
     ): FlareSolution? {
-        val payload =
-            objectMapper.writeValueAsString(
-                mapOf(
-                    "url" to targetUrl,
-                    "time" to 20,
-                ),
-            )
-
-        val request =
-            Request
-                .Builder()
-                .url("http://127.0.0.1:$port/bridge_webview")
-                .post(payload.toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-        solverClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                logger.warn { "Webview bridge answered ${response.code}" }
-                return null
-            }
-
-            val body = response.body?.string().orEmpty()
-            if (body.isEmpty()) return null
-
-            val parsed = objectMapper.readTree(body)
-            if (!parsed.path("success").asBoolean(false)) {
-                logger.warn { "Webview bridge reported failure: ${parsed.path("error").asText()}" }
-                return null
-            }
-
-            val cookies = mutableListOf<FlareCookie>()
-            parsed.path("cookies").forEach { c ->
-                val name = c.path("name").asText("")
-                val value = c.path("value").asText("")
-                val domain = c.path("domain").asText("")
-                val path = c.path("path").asText("/")
-                if (name.isNotEmpty()) {
-                    cookies.add(
-                        FlareCookie(
-                            name = name,
-                            value = value,
-                            domain = domain,
-                            path = path,
-                        ),
-                    )
-                }
-            }
-
-            return FlareSolution(
-                status = 200,
-                userAgent = "",
-                cookies = cookies,
-            ).takeIf { it.cookies.isNotEmpty() }
-        }
+        // The WebView bridge has already stored the clearance cookies in the
+        // shared jar; only the user-agent that earned them remains to apply.
+        val userAgent = solver.solve(request) ?: return null
+        return FlareSolution(status = 200, userAgent = userAgent)
     }
 
     // Only one challenge is solved at a time; locking intercept() as a whole

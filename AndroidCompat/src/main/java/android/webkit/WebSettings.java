@@ -1417,7 +1417,7 @@ public abstract class WebSettings {
      * @param context a Context object used to access application assets
      */
     public static String getDefaultUserAgent(Context context) {
-        throw new RuntimeException("Stub!");
+        return xyz.nulldev.androidcompat.webkit.KcefWebSettings.defaultUserAgent();
     }
 
     /**

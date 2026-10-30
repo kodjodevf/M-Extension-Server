@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.App
 import io.github.oshai.kotlinlogging.KotlinLogging
 import mextensionserver.controller.MExtensionServerController
 import mextensionserver.ui.ServerWindow
+import mextensionserver.webview.RemoteWebViewBridge
 import org.kodein.di.DI
 import org.kodein.di.conf.global
 import xyz.nulldev.androidcompat.AndroidCompat
@@ -76,6 +77,8 @@ internal fun initApplication(appDir: String?) {
         DI.global.addImport(ConfigKodeinModule().create())
         // Load Android compatibility dependencies
         AndroidCompatInitializer().init()
+        // Extension WebViews run in the client's WebView host when it has one.
+        RemoteWebViewBridge.install()
         // start app
         androidCompat.startApp(App())
         applicationInitialized = true

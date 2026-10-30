@@ -30,6 +30,10 @@ dependencies {
     // AndroidCompat
     implementation(project(":AndroidCompat"))
     implementation(project(":AndroidCompat:Config"))
+    // Framework types (View, WebView supertypes, android.webkit interfaces)
+    // the WebView bridge implements. AndroidCompat already ships them at runtime.
+    compileOnly(libs.android.stubs)
+    testCompileOnly(libs.android.stubs)
 }
 
 @Suppress("PropertyName")

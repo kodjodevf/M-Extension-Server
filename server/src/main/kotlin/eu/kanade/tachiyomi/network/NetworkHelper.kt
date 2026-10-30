@@ -12,6 +12,7 @@ import android.content.Context
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
+import eu.kanade.tachiyomi.network.interceptor.WebViewCloudflareSolver
 import okhttp3.Cache
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -36,6 +37,7 @@ class NetworkHelper(
                         ::cloudflareProxyUrlProvider,
                         ::setSolvedUA,
                         cookieJar::addAll,
+                        WebViewCloudflareSolver(context, cookieJar),
                     ),
                 ).connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
