@@ -9,6 +9,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import mextensionserver.impl.MExtensionServerLoader
 import mextensionserver.impl.MihonInvoker
 import mextensionserver.model.DataBody
+import mextensionserver.webview.RemoteWebViewBridge
 import okhttp3.Cookie
 import okhttp3.HttpUrl
 
@@ -29,16 +30,11 @@ class DalvikHandler {
             // Deserialize DataBody
             val dataBody = objectMapper.readValue(json, DataBody::class.java)
 
-            val bridgePortHeader =
-                (
-                    session.headers[WEBVIEW_BRIDGE_PORT_HEADER]
-                        ?: session.headers["x-mangayomi-webview-port"]
-                        ?: session.headers["X-Mangayomi-Webview-Port"]
-                )
-            val bridgePort = bridgePortHeader?.toIntOrNull() ?: 0
-            if (bridgePort > 0) {
-                xyz.nulldev.androidcompat.webkit.KcefWebViewProvider.bridgePort = bridgePort
-            }
+            // NanoHTTPD lower-cases header names.
+            RemoteWebViewBridge.configure(
+                port = session.headers[RemoteWebViewBridge.PORT_HEADER]?.toIntOrNull(),
+                token = session.headers[RemoteWebViewBridge.TOKEN_HEADER],
+            )
 
             val invocation =
                 MExtensionServerLoader.invokeWithExtension(dataBody.data, dataBody.extensionId) { loadedExtension ->
@@ -194,8 +190,5 @@ class DalvikHandler {
 
         /** Identifies which source of a multi-source extension the call is for. */
         const val SOURCE_BASE_URL_HEADER = "source-base-url"
-
-        /** Port of Mangayomi's local headless webview resolution server. */
-        const val WEBVIEW_BRIDGE_PORT_HEADER = "x-mangayomi-webview-port"
     }
 }

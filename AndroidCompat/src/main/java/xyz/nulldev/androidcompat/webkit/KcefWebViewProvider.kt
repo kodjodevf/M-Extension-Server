@@ -58,14 +58,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import org.cef.CefSettings
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
@@ -130,9 +122,6 @@ class KcefWebViewProvider(
         const val TAG = "KcefWebViewProvider"
         const val QUERY_FN = "__\$_suwayomiQuery"
         const val QUERY_CANCEL_FN = "__\$_suwayomiQueryCancel"
-
-        @Volatile
-        var bridgePort: Int = 0
 
         private val initHandler: InitBrowserHandler by DI.global.instance<InitBrowserHandler>()
     }
@@ -571,7 +560,7 @@ class KcefWebViewProvider(
                 }
         } catch (error: Throwable) {
             initializationFailure = error
-            Log.d(TAG, "Desktop WebView (CEF) is unavailable (${error.message ?: error.javaClass.simpleName}); using bridge/stub fallback")
+            Log.d(TAG, "Desktop WebView (CEF) is unavailable (${error.message ?: error.javaClass.simpleName}); failing loads gracefully")
             return
         }
         initHandler.init(this)
@@ -641,7 +630,7 @@ class KcefWebViewProvider(
         additionalHttpHeaders: Map<String, String>,
     ) {
         currentUrl = loadUrl
-        Log.d(TAG, "loadUrl: $loadUrl (bridgePort: $bridgePort)")
+        Log.d(TAG, "loadUrl: $loadUrl")
         browser?.close(true)
         browser?.dispose()
         browser = null
@@ -662,29 +651,11 @@ class KcefWebViewProvider(
                 Log.d(TAG, "Page loaded at URL $loadUrl")
                 return
             } catch (e: Exception) {
-                Log.w(TAG, "CEF createBrowser failed: $e, falling back to bridge/stub")
+                Log.w(TAG, "CEF createBrowser failed: $e, failing the load")
             }
         }
 
-        // CEF is unavailable or failed to initialize
-        if (bridgePort > 0) {
-            val combinedHeaders = HashMap(additionalHttpHeaders)
-            if (settings.userAgentString.isNotEmpty()) {
-                combinedHeaders["User-Agent"] = settings.userAgentString
-            }
-            executeBridgeWebview(bridgePort, loadUrl, combinedHeaders)
-        } else {
-            Log.w(TAG, "Desktop WebView is unavailable and no bridge configured; failing gracefully for $loadUrl")
-            handler.post {
-                viewClient.onReceivedError(
-                    view,
-                    WebViewClient.ERROR_UNKNOWN,
-                    "Desktop WebView is unavailable",
-                    loadUrl,
-                )
-                viewClient.onPageFinished(view, loadUrl)
-            }
-        }
+        failUnavailable(loadUrl)
     }
 
     override fun loadUrl(url: String) {
@@ -716,29 +687,27 @@ class KcefWebViewProvider(
                 Log.d(TAG, "Page posted at URL $url")
                 return
             } catch (e: Exception) {
-                Log.w(TAG, "CEF createBrowser failed: $e, falling back to bridge/stub")
+                Log.w(TAG, "CEF createBrowser failed: $e, failing the load")
             }
         }
 
-        if (bridgePort > 0) {
-            val headers =
-                if (settings.userAgentString.isNotEmpty()) {
-                    mapOf("User-Agent" to settings.userAgentString)
-                } else {
-                    emptyMap()
-                }
-            executeBridgeWebview(bridgePort, url, headers, postData = postData)
-        } else {
-            Log.w(TAG, "Desktop WebView is unavailable and no bridge configured; failing gracefully for $url")
-            handler.post {
-                viewClient.onReceivedError(
-                    view,
-                    WebViewClient.ERROR_UNKNOWN,
-                    "Desktop WebView is unavailable",
-                    url,
-                )
-                viewClient.onPageFinished(view, url)
-            }
+        failUnavailable(url)
+    }
+
+    /**
+     * Reports a load that cannot happen because no browser engine is available,
+     * in the order Android reports a failed load.
+     */
+    private fun failUnavailable(url: String) {
+        Log.w(TAG, "Desktop WebView is unavailable; failing load of $url")
+        handler.post {
+            viewClient.onReceivedError(
+                view,
+                WebViewClient.ERROR_UNKNOWN,
+                "Desktop WebView is unavailable",
+                url,
+            )
+            viewClient.onPageFinished(view, url)
         }
     }
 
@@ -811,16 +780,6 @@ class KcefWebViewProvider(
                     handler.post { resultCallback.onReceiveValue(it) }
                 },
             )
-        } else if (bridgePort > 0) {
-            Thread {
-                try {
-                    val jsResult = executeBridgeJavascript(bridgePort, currentUrl ?: "", script)
-                    handler.post { resultCallback.onReceiveValue(jsResult) }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Bridge JS evaluation failed", e)
-                    handler.post { resultCallback.onReceiveValue(null) }
-                }
-            }.start()
         } else {
             handler.post { resultCallback.onReceiveValue(null) }
         }
@@ -1077,184 +1036,6 @@ class KcefWebViewProvider(
     override fun getScrollDelegate(): ScrollDelegate = scrollDelegate
 
     override fun notifyFindDialogDismissed() {}
-
-    private fun executeBridgeWebview(
-        port: Int,
-        url: String,
-        headers: Map<String, String>? = null,
-        postData: ByteArray? = null,
-        scripts: List<String>? = null,
-    ) {
-        Thread {
-            try {
-                val jsonPayload =
-                    buildJsonObject {
-                        put("url", JsonPrimitive(url))
-                        headers?.let { h ->
-                            put(
-                                "headers",
-                                buildJsonObject {
-                                    h.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
-                                },
-                            )
-                        }
-                        postData?.let {
-                            put("postData", JsonPrimitive(String(it, Charsets.UTF_8)))
-                        }
-                        scripts?.let { s ->
-                            put(
-                                "scripts",
-                                buildJsonArray {
-                                    s.forEach { add(JsonPrimitive(it)) }
-                                },
-                            )
-                        }
-                        put("time", JsonPrimitive(20))
-                    }
-
-                val conn =
-                    (
-                        java.net
-                            .URI("http://127.0.0.1:$port/bridge_webview")
-                            .toURL()
-                            .openConnection() as java.net.HttpURLConnection
-                    ).apply {
-                        requestMethod = "POST"
-                        connectTimeout = 25000
-                        readTimeout = 25000
-                        doOutput = true
-                        setRequestProperty("Content-Type", "application/json")
-                    }
-                conn.outputStream.use { os ->
-                    os.write(jsonPayload.toString().toByteArray(Charsets.UTF_8))
-                }
-                val code = conn.responseCode
-                if (code == 200) {
-                    val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = Json { ignoreUnknownKeys = true }
-                    val responseObj = json.parseToJsonElement(responseStr).jsonObject
-
-                    val finalUrl = responseObj["url"]?.jsonPrimitive?.contentOrNull ?: url
-                    val html = responseObj["html"]?.jsonPrimitive?.contentOrNull
-                    currentUrl = finalUrl
-
-                    html?.let {
-                        urlHttpMapping[url.trimEnd('/')] = it
-                        urlHttpMapping[finalUrl.trimEnd('/')] = it
-                    }
-
-                    // Save cookies
-                    val cookiesArray = responseObj["cookies"]?.jsonArray
-                    val cookieManager = android.webkit.CookieManager.getInstance()
-                    cookiesArray?.forEach { element ->
-                        val cookieObj = element.jsonObject
-                        val name = cookieObj["name"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val value = cookieObj["value"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val domain = cookieObj["domain"]?.jsonPrimitive?.contentOrNull
-                        val path = cookieObj["path"]?.jsonPrimitive?.contentOrNull
-                        if (name.isNotEmpty()) {
-                            val cookieStr =
-                                buildString {
-                                    append("$name=$value")
-                                    domain?.let { append("; Domain=$it") }
-                                    path?.let { append("; Path=$it") }
-                                }
-                            cookieManager.setCookie(finalUrl, cookieStr)
-                        }
-                    }
-
-                    // Replay intercepted resources to the WebViewClient
-                    val resourcesArray = responseObj["resources"]?.jsonArray
-                    resourcesArray?.forEach { resElement ->
-                        val resUrl = resElement.jsonPrimitive.contentOrNull
-                        if (!resUrl.isNullOrEmpty()) {
-                            val webRequest =
-                                object : WebResourceRequest {
-                                    override fun getUrl(): Uri = Uri.parse(resUrl)
-                                    override fun isForMainFrame(): Boolean = false
-                                    override fun isRedirect(): Boolean = false
-                                    override fun hasGesture(): Boolean = false
-                                    override fun getMethod(): String = "GET"
-                                    override fun getRequestHeaders(): Map<String, String> = emptyMap()
-                                }
-                            try {
-                                viewClient.shouldInterceptRequest(view, webRequest)
-                            } catch (e: Exception) {
-                                Log.d(TAG, "viewClient.shouldInterceptRequest threw: $e")
-                            }
-                            try {
-                                @Suppress("DEPRECATION")
-                                viewClient.shouldInterceptRequest(view, resUrl)
-                            } catch (e: Exception) {
-                                Log.d(TAG, "viewClient.shouldInterceptRequest(String) threw: $e")
-                            }
-                        }
-                    }
-
-                    handler.post {
-                        chromeClient.onProgressChanged(view, 100)
-                        viewClient.onPageFinished(view, finalUrl)
-                    }
-                } else {
-                    val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
-                    Log.w(TAG, "Bridge returned error: $err")
-                    handler.post {
-                        viewClient.onReceivedError(view, WebViewClient.ERROR_UNKNOWN, err, url)
-                        viewClient.onPageFinished(view, url)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Bridge request failed for $url", e)
-                handler.post {
-                    viewClient.onReceivedError(
-                        view,
-                        WebViewClient.ERROR_HOST_LOOKUP,
-                        e.message ?: "Bridge request failed",
-                        url,
-                    )
-                    viewClient.onPageFinished(view, url)
-                }
-            }
-        }.start()
-    }
-
-    private fun executeBridgeJavascript(
-        port: Int,
-        url: String,
-        script: String,
-    ): String? {
-        val jsonPayload =
-            buildJsonObject {
-                put("url", JsonPrimitive(url))
-                put("scripts", buildJsonArray { add(JsonPrimitive(script)) })
-                put("time", JsonPrimitive(10))
-            }
-        val conn =
-            (
-                java.net
-                    .URI(
-                        "http://127.0.0.1:$port/evaluateJavascriptViaWebview",
-                    ).toURL()
-                    .openConnection() as java.net.HttpURLConnection
-            ).apply {
-                requestMethod = "POST"
-                connectTimeout = 12000
-                readTimeout = 12000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-            }
-        conn.outputStream.use { os ->
-            os.write(jsonPayload.toString().toByteArray(Charsets.UTF_8))
-        }
-        val code = conn.responseCode
-        if (code == 200) {
-            val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
-            val json = Json { ignoreUnknownKeys = true }
-            val responseObj = json.parseToJsonElement(responseStr).jsonObject
-            return responseObj["result"]?.jsonPrimitive?.contentOrNull
-        }
-        return null
-    }
 
     // -------------------------------------------------------------------------
     // View / ViewGroup delegation methods

@@ -373,10 +373,14 @@ class KcefWebSettings : WebSettings() {
     override fun getDefaultTextEncodingName() = defaultTextEncodingName ?: ""
 
     override fun setUserAgentString(p0: String?) {
-        userAgentString = p0
+        // As on Android, null or an empty string restores the default.
+        userAgentString = p0?.takeIf { it.isNotEmpty() }
     }
 
     override fun getUserAgentString() = userAgentString ?: defaultUserAgent()
+
+    /** Whether the extension set its own user-agent rather than using the default. */
+    fun hasCustomUserAgent(): Boolean = userAgentString != null
 
     override fun setNeedInitialFocus(p0: Boolean) {
         needInitialFocus = p0
@@ -424,6 +428,16 @@ class KcefWebSettings : WebSettings() {
     override fun getDisabledActionModeMenuItems() = disabledActionModeMenuItems
 
     companion object {
-        fun defaultUserAgent() = System.getProperty("http.agent")
+        /**
+         * Supplies the user-agent of the engine actually rendering pages, so
+         * [getUserAgentString] and [WebSettings.getDefaultUserAgent] report what
+         * a site will see, as they do on Android. Falls back to `http.agent`.
+         */
+        @Volatile
+        @JvmStatic
+        var defaultUserAgentProvider: () -> String? = { null }
+
+        @JvmStatic
+        fun defaultUserAgent(): String = defaultUserAgentProvider() ?: System.getProperty("http.agent")
     }
 }
