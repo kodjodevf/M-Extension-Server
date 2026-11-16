@@ -65,6 +65,116 @@ class BytecodeEditorTest {
         }
     }
 
+    @Test
+    fun `restores allocations whose trivial constructors were removed`() {
+        val jar = Files.createTempFile("bytecode-editor-test", ".jar")
+        try {
+            writeJar(
+                jar,
+                mapOf(
+                    "Browser.class" to constructorlessBase(),
+                    "Chrome.class" to constructorlessSingleton(),
+                    "Tag.class" to constructorlessTag(),
+                    "Tagger.class" to tagger(),
+                ),
+            )
+
+            BytecodeEditor.fixAndroidClasses(jar)
+
+            URLClassLoader(arrayOf(jar.toUri().toURL()), javaClass.classLoader).use { loader ->
+                val chrome = Class.forName("Chrome", true, loader)
+                val instance = chrome.getField("INSTANCE").get(null)
+                assertEquals("Chrome", instance.javaClass.name)
+                val tag =
+                    Class
+                        .forName("Tagger", true, loader)
+                        .getMethod("tag")
+                        .invoke(null)
+                assertEquals("Tag", tag.javaClass.name)
+                assertEquals(true, tag.javaClass.getField("applied").get(tag))
+            }
+        } finally {
+            Files.deleteIfExists(jar)
+        }
+    }
+
+    // A sealed base whose empty constructor was removed when shrinking.
+    private fun constructorlessBase(): ByteArray {
+        val writer = ClassWriter(0)
+        writer.visit(
+            Opcodes.V1_8,
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_ABSTRACT,
+            "Browser",
+            null,
+            "java/lang/Object",
+            null,
+        )
+        writer.visitEnd()
+        return writer.toByteArray()
+    }
+
+    // DEX lets `new Chrome` run `Object.<init>`, which dex2jar translates as
+    // `new Object`, two levels above the type the field holds.
+    private fun constructorlessSingleton(): ByteArray {
+        val writer = ClassWriter(0)
+        writer.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC or Opcodes.ACC_FINAL, "Chrome", null, "Browser", null)
+        writer
+            .visitField(
+                Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC or Opcodes.ACC_FINAL,
+                "INSTANCE",
+                "LChrome;",
+                null,
+                null,
+            ).visitEnd()
+        writer
+            .visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null)
+            .apply {
+                visitCode()
+                visitTypeInsn(Opcodes.NEW, "java/lang/Object")
+                visitInsn(Opcodes.DUP)
+                visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+                visitFieldInsn(Opcodes.PUTSTATIC, "Chrome", "INSTANCE", "LChrome;")
+                visitInsn(Opcodes.RETURN)
+                visitMaxs(2, 0)
+                visitEnd()
+            }
+        writer.visitEnd()
+        return writer.toByteArray()
+    }
+
+    private fun constructorlessTag(): ByteArray {
+        val writer = ClassWriter(0)
+        writer.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC or Opcodes.ACC_FINAL, "Tag", null, "java/lang/Object", null)
+        writer.visitField(Opcodes.ACC_PUBLIC, "applied", "Z", null, null).visitEnd()
+        writer.visitEnd()
+        return writer.toByteArray()
+    }
+
+    // dex2jar can declare a max stack below what the code uses; the repair
+    // must still analyse the method.
+    private fun tagger(): ByteArray {
+        val writer = ClassWriter(0)
+        writer.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC or Opcodes.ACC_FINAL, "Tagger", null, "java/lang/Object", null)
+        writer
+            .visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "tag", "()LTag;", null, null)
+            .apply {
+                visitCode()
+                visitTypeInsn(Opcodes.NEW, "java/lang/Object")
+                visitInsn(Opcodes.DUP)
+                visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+                visitVarInsn(Opcodes.ASTORE, 0)
+                visitVarInsn(Opcodes.ALOAD, 0)
+                visitInsn(Opcodes.ICONST_1)
+                visitFieldInsn(Opcodes.PUTFIELD, "Tag", "applied", "Z")
+                visitVarInsn(Opcodes.ALOAD, 0)
+                visitInsn(Opcodes.ARETURN)
+                visitMaxs(1, 1)
+                visitEnd()
+            }
+        writer.visitEnd()
+        return writer.toByteArray()
+    }
+
     private fun writeJar(
         jar: Path,
         entries: Map<String, ByteArray>,
