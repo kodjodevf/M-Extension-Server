@@ -19,8 +19,11 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.tree.ClassNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
+import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.analysis.Analyzer
+import org.objectweb.asm.tree.analysis.AnalyzerException
+import org.objectweb.asm.tree.analysis.Frame
 import org.objectweb.asm.tree.analysis.SourceInterpreter
 import org.objectweb.asm.tree.analysis.SourceValue
 import java.nio.file.Files
@@ -581,17 +584,7 @@ object BytecodeEditor {
                         }
                 }
 
-                val frames =
-                    runCatching {
-                        Analyzer(
-                            object : SourceInterpreter(Opcodes.ASM9) {
-                                override fun copyOperation(
-                                    instruction: org.objectweb.asm.tree.AbstractInsnNode,
-                                    value: SourceValue,
-                                ): SourceValue = value
-                            },
-                        ).analyze(node.name, method)
-                    }.getOrNull() ?: return@forEach
+                val frames = analyzeSources(node.name, method) ?: return@forEach
 
                 repairAbstractArrayAllocations(method.instructions.toArray(), frames).also {
                     changed = changed || it
@@ -770,8 +763,11 @@ object BytecodeEditor {
             allocations.forEach { allocation ->
                 val replacementType =
                     if (!expectedInfo.isInterface && !expectedInfo.isAbstract) {
+                        // DEX may run an ancestor's constructor on a new
+                        // object once the trivial ones between were removed,
+                        // which dex2jar translates as allocating that ancestor.
                         expectedType.takeIf {
-                            allocation.desc == expectedInfo.superName ||
+                            (allocation.desc != expectedType && isAssignableFrom(allocation.desc, expectedType)) ||
                                 (
                                     allocation.desc != expectedType &&
                                         classInfo(allocation.desc)?.superName == expectedInfo.superName
@@ -850,10 +846,7 @@ object BytecodeEditor {
             val node = ClassNode(Opcodes.ASM9)
             ClassReader(bytes).accept(node, 0)
             node.methods.forEach { method ->
-                val frames =
-                    runCatching {
-                        Analyzer(sourceInterpreter()).analyze(node.name, method)
-                    }.getOrNull() ?: return@forEach
+                val frames = analyzeSources(node.name, method) ?: return@forEach
                 method.instructions.toArray().forEachIndexed { index, instruction ->
                     if (
                         instruction !is MethodInsnNode ||
@@ -886,10 +879,7 @@ object BytecodeEditor {
             node.methods.forEach { method ->
                 val declaredReturn = Type.getReturnType(method.desc)
                 if (declaredReturn.sort != Type.OBJECT) return@forEach
-                val frames =
-                    runCatching {
-                        Analyzer(sourceInterpreter()).analyze(node.name, method)
-                    }.getOrNull() ?: return@forEach
+                val frames = analyzeSources(node.name, method) ?: return@forEach
                 val actualTypes =
                     method.instructions
                         .toArray()
@@ -919,10 +909,7 @@ object BytecodeEditor {
             val node = ClassNode(Opcodes.ASM9)
             ClassReader(bytes).accept(node, 0)
             node.methods.forEach { method ->
-                val frames =
-                    runCatching {
-                        Analyzer(sourceInterpreter()).analyze(node.name, method)
-                    }.getOrNull() ?: return@forEach
+                val frames = analyzeSources(node.name, method) ?: return@forEach
                 method.instructions.toArray().forEachIndexed { index, instruction ->
                     val invocation = instruction as? MethodInsnNode ?: return@forEachIndexed
                     if (!classes.containsKey(invocation.owner)) return@forEachIndexed
@@ -996,10 +983,7 @@ object BytecodeEditor {
                     node.methods.singleOrNull {
                         it.name == "invoke" && it.desc == "()Ljava/lang/Object;"
                     } ?: return@getOrPut null
-                val frames =
-                    runCatching {
-                        Analyzer(sourceInterpreter()).analyze(node.name, method)
-                    }.getOrNull() ?: return@getOrPut null
+                val frames = analyzeSources(node.name, method) ?: return@getOrPut null
                 val returnTypes =
                     method.instructions
                         .toArray()
@@ -1029,6 +1013,34 @@ object BytecodeEditor {
                         }.distinct()
                 returnTypes.singleOrNull()
             }
+
+        /**
+         * Where each value of [method] comes from, or null when it can't be
+         * analysed, which leaves the method as dex2jar wrote it.
+         */
+        private fun analyzeSources(
+            owner: String,
+            method: MethodNode,
+        ): Array<Frame<SourceValue>?>? {
+            while (true) {
+                try {
+                    return Analyzer(sourceInterpreter()).analyze(owner, method)
+                } catch (error: Exception) {
+                    // dex2jar can declare a max stack below what the method
+                    // uses. The analysis only needs the room, and the class is
+                    // written with recomputed sizes anyway.
+                    if (error is AnalyzerException &&
+                        error.message?.contains("Insufficient maximum stack size") == true &&
+                        method.maxStack < MAX_ANALYZED_STACK
+                    ) {
+                        method.maxStack = (method.maxStack * 2).coerceIn(8, MAX_ANALYZED_STACK)
+                        continue
+                    }
+                    logger.debug { "Not repairing $owner.${method.name}${method.desc}: ${error.message}" }
+                    return null
+                }
+            }
+        }
 
         private fun sourceInterpreter() =
             object : SourceInterpreter(Opcodes.ASM9) {
@@ -1189,6 +1201,9 @@ object BytecodeEditor {
 
         private companion object {
             const val OBJECT = "java/lang/Object"
+
+            // The JVM limit on a method's operand stack.
+            const val MAX_ANALYZED_STACK = 0xFFFF
         }
     }
 }
